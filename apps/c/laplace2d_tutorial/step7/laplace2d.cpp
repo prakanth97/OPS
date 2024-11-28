@@ -104,7 +104,6 @@ int main(int argc, const char** argv)
       ops_arg_dat(d_Anew, 1, S2D_00, "double", OPS_WRITE),
       ops_arg_idx());
 
-
   while ( error > tol && iter < iter_max )
   {
     int interior_range[] = {0,imax,0,jmax};

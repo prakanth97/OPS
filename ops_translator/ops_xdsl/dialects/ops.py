@@ -3,7 +3,7 @@ Notes :
 TODO: Write verification of operations
 """
 
-from typing import Union
+from typing import Union, Iterable
 
 from xdsl.dialects.builtin import (
     IntegerAttr,
@@ -15,6 +15,10 @@ from xdsl.dialects.builtin import (
     FloatAttr,
     Attribute,
     FunctionType,
+    i32,
+    i64,
+    f32,
+    f64
 )
 from xdsl.ir import (
     Data,
@@ -22,7 +26,7 @@ from xdsl.ir import (
     Dialect,
     Region,
     Block,
-    SSAValue,
+    SSAValue, Operation,
 )
 from xdsl.irdl import (
     irdl_attr_definition,
@@ -31,26 +35,27 @@ from xdsl.irdl import (
     IRDLOperation,
     region_def,
     operand_def,
-    AnyOf, result_def,
+    AnyOf,
+    result_def,
+    ParameterDef,
 )
-from xdsl.dialects import (
-    arith
-)
+
+from clang.cindex import Type
 
 ######### OP Definition ########
 
-@irdl_op_definition
-class BinaryOp(IRDLOperation):
-    name = "ops.ir.binary_op"
-
-    op = attr_def(StringAttr)
-    lhs = operand_def(Attribute)
-    rhs = operand_def(Attribute)
-    res = result_def(Attribute)
-
-    def __init__(self, op: str, lhs: SSAValue, rhs: SSAValue):
-        # TODO: Replace binary op with arith dialect
-        super().__init__(result_types=[lhs.type], attributes={"op": StringAttr(op)}, operands=[lhs, rhs])
+# @irdl_op_definition
+# class BinaryOp(IRDLOperation):
+#     name = "ops.ir.binary_op"
+#
+#     op = attr_def(StringAttr)
+#     lhs = operand_def(Attribute)
+#     rhs = operand_def(Attribute)
+#     res = result_def(Attribute)
+#
+#     def __init__(self, op: str, lhs: SSAValue, rhs: SSAValue):
+#         # TODO: Replace binary op with arith dialect
+#         super().__init__(result_types=[lhs.type], attributes={"op": StringAttr(op)}, operands=[lhs, rhs])
 
 @irdl_op_definition
 class Literal(IRDLOperation):
@@ -142,10 +147,22 @@ class OpsParLoop(IRDLOperation):
 #     param_type =
 #
 
+# @irdl_attr_definition
+# class ArrayType(ParametrizedAttribute):
+#     name = "array.type"
+#
+#     member_type: Union[i32, f32, f64]
+#     size: ParameterDef[IntegerAttr]
+#
+#     # def __init__(self, member_type, size: int):
+#         # self.member_type = member_type
+#         # self.size = IntegerAttr.from_index_int_value(size)
+#
+
 class Param:
     name: str
-    type: str
+    type: Type
 
-    def __init__(self, name: str, type: str):
+    def __init__(self, name: str, typ: Type):
         self.name = name
-        self.type = type
+        self.type = typ

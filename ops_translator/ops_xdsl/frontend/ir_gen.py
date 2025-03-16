@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from clang.cindex import Cursor, CursorKind, TranslationUnit, TypeKind
+from clang.cindex import Cursor, CursorKind, TranslationUnit
+from xdsl.dialects.arith import AddiOp, AddfOp, SIToFPOp, SubfOp, SubiOp, MulfOp, MuliOp, DivfOp
 
 from dialects.ops import (
-    BinaryOp,
     Literal,
     FuncOp,
     Param,
@@ -14,9 +14,11 @@ from dialects.ops import (
 from xdsl.builder import Builder
 from xdsl.dialects.builtin import (
     ModuleOp,
-    IntegerAttr,
     i32,
+    f32,
+    f64,
     FunctionType,
+    DenseIntOrFPElementsAttr,
 )
 from xdsl.ir import (
     SSAValue,
@@ -66,11 +68,11 @@ class IRGen(ASTVisitor):
         self.symbol_table = ScopedDict[str, SSAValue]()
         for cursor in ast.cursor.get_children():
             if isinstance(cursor, Cursor):
-                self.visit(cursor, 0)
+                self.visit(cursor)
 
         return self.module
 
-    def visit_function_decl(self, cursor, level) -> FuncOp:
+    def visit_function_decl(self, cursor) -> FuncOp:
         """
         Emit a function declaration in the current scope.
         """
@@ -87,7 +89,7 @@ class IRGen(ASTVisitor):
         body_cursor: Cursor | None = None
         for child in cursor.get_children():
             if child.kind == CursorKind.PARM_DECL:
-                params.append(Param(child.spelling, child.type.spelling))
+                params.append(Param(child.spelling, child.type))
             elif child.kind == CursorKind.COMPOUND_STMT:
                 body_cursor = child
 
@@ -103,7 +105,7 @@ class IRGen(ASTVisitor):
             self.declare(param.name, value)
 
         if body_cursor is not None:
-            self.visit(body_cursor, level + 1)
+            self.visit(body_cursor)
 
         # TODO: Handle ReturnOP
 
@@ -132,7 +134,7 @@ class IRGen(ASTVisitor):
         func_type = FunctionType.from_lists(input_types, [result_type])
         return self.builder.insert(FuncOp(cursor.spelling, func_type, Region()))
 
-    def visit_var_decl(self, cursor, level):
+    def visit_var_decl(self, cursor):
         """
         Handle the variable declaration, this will codegen the expression that forms the
         initializer and record the value in the symbol table before returning it.
@@ -141,20 +143,20 @@ class IRGen(ASTVisitor):
         """
 
         var_name = cursor.spelling
-        var_type = utils.get_type(cursor.type.spelling)
+        var_type = utils.get_type(cursor.type)
 
         # Handle the initializer expression
         value = llvm.UndefOp(i32).res
         for child in cursor.get_children():
             if isinstance(child, Cursor):
-                value = self.visit(child, level + 1)
+                value = self.visit(child)
             break
 
         self.declare(var_name, value)
 
         return value
 
-    def visit_binary_operator(self, cursor, level):
+    def visit_binary_operator(self, cursor):
         """
         Handle the binary operator, this will codegen the operands and the operation
         and return the resulting value.
@@ -162,61 +164,146 @@ class IRGen(ASTVisitor):
 
         # Handle the left operand
         children = cursor.get_children()
-        left = self.visit(next(children), level + 1)
-        right = self.visit(next(children), level + 1)
+        left = self.visit(next(children))
+        right = self.visit(next(children))
 
         bin_op = utils.get_binary_operator(cursor)
-        op = self.builder.insert(BinaryOp(bin_op, left, right))
 
-        return op.res
+        return self.math(bin_op, left, right)
 
-    def visit_floating_literal(self, cursor, level) -> SSAValue:
+    def math(self, op: str, left: SSAValue, right: SSAValue) -> SSAValue:
+        if op == "+":
+            return self.math_add(left, right)
+        elif op == "-":
+            return self.math_sub(left, right)
+        elif op == "*":
+            return self.math_mul(left, right)
+        elif op == "/":
+            return self.math_div(left, right)
+        else:
+            raise NotImplementedError(op)
+
+    def math_add(self, left: SSAValue, right: SSAValue) -> SSAValue:
+        if left.type.name == "f32" or left.type.name == "f64":
+            op = self.builder.insert(AddfOp(left, right))
+        elif left.type.name == "integer_type":
+            op = self.builder.insert(AddiOp(left, right))
+        else:
+            raise ValueError(f"Unsupported operand type: {left.type}, {right.type}")
+        return op.result
+
+    def math_sub(self, left: SSAValue, right: SSAValue):
+        if left.type.name == "f32" or left.type.name == "f64":
+            op = self.builder.insert(SubfOp(left, right))
+        elif left.type.name == "integer_type":
+            op = self.builder.insert(SubiOp(left, right))
+        else:
+            raise ValueError(f"Unsupported operand type: {left.type}, {right.type}")
+        return op.result
+
+    def math_mul(self, left: SSAValue, right: SSAValue):
+        if left.type.name == "f32" or left.type.name == "f64":
+            op = self.builder.insert(MulfOp(left, right))
+        elif left.type.name == "integer_type":
+            op = self.builder.insert(MuliOp(left, right))
+        else:
+            raise ValueError(f"Unsupported operand type: {left.type}, {right.type}")
+        return op.result
+
+    def math_div(self, left: SSAValue, right: SSAValue):
+        if left.type.name == "f32" or left.type.name == "f64":
+            op = self.builder.insert(DivfOp(left, right))
+        elif left.type.name == "integer_type":
+            op = self.builder.insert(DivfOp(left, right))
+        else:
+            raise ValueError(f"Unsupported operand type: {left.type}, {right.type}")
+        return op.result
+
+    def visit_floating_literal(self, cursor) -> SSAValue:
         value = utils.get_literal_value(cursor)
 
-        literal = Literal(float(value), 32)
+        if cursor.type.spelling == "double":
+            width = 64
+        else:
+            width = 32
+
+        literal = Literal(float(value), width)
         op = self.builder.insert(literal)
         return op.res
 
-    def visit_integer_literal(self, cursor, level) -> SSAValue:
+    def visit_integer_literal(self, cursor) -> SSAValue:
         value = utils.get_literal_value(cursor)
 
         literal = Literal(int(value), 32)
         op = self.builder.insert(literal)
         return op.res
 
-    def visit_boolean_literal(self, cursor, level) -> SSAValue:
+    def visit_boolean_literal(self, cursor) -> SSAValue:
         value = utils.get_literal_value(cursor)
 
         literal = Literal(bool(value), 1)
         op = self.builder.insert(literal)
         return op.res
 
-    def visit_string_literal(self, cursor, level) -> SSAValue:
+    def visit_string_literal(self, cursor) -> SSAValue:
         value = utils.get_literal_value(cursor)
 
         literal = Literal(str(value), 32)
         op = self.builder.insert(literal)
         return op.res
 
-    def visit_unexposed_expr(self, cursor, level) -> SSAValue|FunctionType:
+    def visit_unexposed_expr(self, cursor) -> SSAValue | FunctionType:
         # Check and handle overloaded function calls
         children = cursor.get_children()
         first_child = next(children)
         if isinstance(first_child, Cursor) & utils.is_contain_overload_func(first_child):
-            return self.handle_overloaded_function(cursor, level)
+            return self.handle_overloaded_function(cursor)
 
         # TODO: Handle other unexposed expressions
         # TODO: Add type cast for cast operations
-        # for child in cursor.get_children():
-        #     if isinstance(child, Cursor):
-        #          self.visit(child, level + 1)
 
-    def visit_decl_ref_expr(self, cursor, level) -> SSAValue|FunctionType:
+        result = None
+        for child in cursor.get_children():
+            if isinstance(child, Cursor):
+                 result = self.visit(child)
+
+        node_type = cursor.type.spelling
+        if node_type != "":
+            # result_type = result.type
+            if node_type == "float":
+                op = self.builder.insert(SIToFPOp(result, f32))
+                return op.result
+            elif node_type == "double":
+                op = self.builder.insert(SIToFPOp(result, f64))
+                return op.result
+            else:
+                return result
+        else:
+            return result
+
+    def visit_decl_ref_expr(self, cursor) -> SSAValue | FunctionType:
         var_name = utils.get_decl_ref_name(cursor)
         return self.symbol_table[var_name]
 
-    def handle_overloaded_function(self, cursor, level) -> FunctionType:
+    def handle_overloaded_function(self, cursor) -> FunctionType:
         pass
 
-    def visit_overloaded_decl_ref(self, cursor, level):
+    def visit_overloaded_decl_ref(self, cursor):
         pass
+
+    def visit_compound_stmt(self, cursor: Cursor):
+        for child in cursor.get_children():
+            self.visit(child)
+
+    def visit_decl_stmt(self, cursor: Cursor):
+        for child in cursor.get_children():
+            self.visit(child)
+
+    def visit_init_list_expr(self, cursor: Cursor):
+        typ = utils.get_type(cursor.type)
+
+        array_element = []
+        for child in cursor.get_children():
+            array_element.append(self.visit(child))
+
+        return DenseIntOrFPElementsAttr.vector_from_list(array_element, typ)

@@ -22,7 +22,7 @@ import ops_types
 class ExtractArgTypeOp(IRDLOperation):
     name = "ops.extract_arg_type"
 
-    ops_arg = operand_def(Attribute) # will be ops_arg struct
+    ops_arg = operand_def(Attribute)
 
     result = result_def(IntegerType(32))
 
@@ -34,7 +34,7 @@ class ExtractArgTypeOp(IRDLOperation):
 class ExtractArgDatOp(IRDLOperation):
     name = "ops.extract_arg_dat"
     
-    ops_arg = operand_def(Attribute) # will be ops_arg struct
+    ops_arg = operand_def(Attribute)
 
     result = result_def()
 
@@ -46,7 +46,7 @@ class ExtractArgDatOp(IRDLOperation):
 class ExtractArgDatDataOp(IRDLOperation):
     name = "ops.extract_arg_dat_data"
     
-    ops_dat = operand_def(Attribute) # will be ops_dat struct
+    ops_dat = operand_def(Attribute)
 
     result = result_def()
 
@@ -58,7 +58,7 @@ class ExtractArgDatDataOp(IRDLOperation):
 class ExtractArgDatSizeOp(IRDLOperation):
     name = "ops.extract_arg_dat_size"
     
-    ops_dat = operand_def(Attribute) # will be ops_dat struct
+    ops_dat = operand_def(Attribute)
 
     result = result_def()
 
@@ -72,7 +72,7 @@ class ExtractArgDatSizeOp(IRDLOperation):
 class ExtractArgAccessOp(IRDLOperation):
     name = "ops.extract_arg_access"
     
-    ops_dat = operand_def(Attribute) # will be ops_arg struct
+    ops_arg = operand_def(Attribute)
 
     result = result_def()
 
@@ -142,6 +142,20 @@ class ExtractRangeOp(IRDLOperation):
     name = "ops.extract_range"
     range_ptr = operand_def()
     dim = operand_def()
+    result = result_def()
+
+
+@irdl_op_definition
+class PointerToMemref(IRDLOperation):
+    name = "ops.ptr_to_memref"
+    ptr = operand_def()
+    result = result_def()
+
+
+@irdl_op_definition
+class MemrefToStencilField(IRDLOperation):
+    name = "ops.memref_to_field"
+    ref = operand_def()
     result = result_def()
 
 

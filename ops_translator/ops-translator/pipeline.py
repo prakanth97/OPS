@@ -62,6 +62,8 @@ class Pipeline(Findable):
 
         new_pass.apply(xdsl_ctx, ir_module)
 
+        # Lower fully to mlir dialects here...
+
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
         # Do strategy-specific lowering
@@ -96,6 +98,7 @@ class Pipeline(Findable):
         for p in passes:
             pm.add(p)
         pm.run(op)
+
         return str(mlir_module)
 
 

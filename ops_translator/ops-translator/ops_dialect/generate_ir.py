@@ -1,37 +1,23 @@
-from xdsl.ir import SSAValue, TypeAttribute, ParametrizedAttribute, Block, Region
+from xdsl.ir import SSAValue, Block, Region
 from xdsl.dialects.builtin import (
-    StringAttr,
-    IntegerAttr,
-    SymbolRefAttr,
-    DenseIntElementsAttr,
-    IndexType,
-    VectorType,
+    FloatAttr,
     ModuleOp,
-    NoneAttr
+    f64
 )
-from xdsl.builder import Builder, InsertPoint, ImplicitBuilder
+from xdsl.builder import Builder, InsertPoint
 from xdsl.dialects.arith import ConstantOp
-from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.dialects import llvm
-from xdsl.dialects.llvm import (
-    LLVMStructType, 
-    LLVMArrayType, 
+from xdsl.dialects.llvm import ( 
     LLVMPointerType, 
-    i32, 
     LLVMFunctionType, 
     LLVMVoidType,
-    DictionaryAttr, 
     UnitAttr, 
-    ArrayAttr, 
     LinkageAttr,
     FuncOp as LLVMFuncOp
 )
 from xdsl.dialects.builtin import (
     ModuleOp,
-    FunctionType,
-    StringAttr,
     IntegerType, 
-    OpaqueAttr
 )
 from ops_dialect import *
 import ops_types
@@ -63,7 +49,7 @@ def create_function(kernel_name: str) -> ModuleOp:
         entry_block.args[i].name_hint = 'ops_arg' + str(i - 3)
 
     fn = LLVMFuncOp(
-        sym_name="ops_par_loop" + kernel_name,
+        sym_name="ops_par_loop_" + kernel_name,
         function_type=LLVMFunctionType(
             inputs=[
                 LLVMPointerType(), # char pointer (i8) (kernel name for debugging)
@@ -120,11 +106,10 @@ def add_ops_operations(module: ModuleOp):
     builder = Builder(InsertPoint.at_start(fn_body))
 
     # create list from parsed kernel here
-    result1 = ConstantOp(IntegerAttr(0, IntegerType(64)))
-    result2 = ConstantOp(IntegerAttr(1, IntegerType(64)))
+    result1 = ConstantOp(FloatAttr(0.0, f64))
 
-    yield_op = YieldOp.create(operands=[result1.results[0], result2.results[0]])
-    kernel_ops = [result1, result2, yield_op]
+    yield_op = YieldOp.create(operands=[result1.results[0]])
+    kernel_ops = [result1, yield_op]
 
     op = create_par_loop(fn_body.args[0], fn_body.args[1], fn_body.args[2], fn_body.args[3], fn_body.args[4], kernel_ops)
 

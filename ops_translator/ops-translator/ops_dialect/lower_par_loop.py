@@ -1,33 +1,31 @@
 from xdsl.passes import ModulePass
-from xdsl.pattern_rewriter import PatternRewriter, RewritePattern, op_type_rewrite_pattern
-from xdsl.ir import Operation, SSAValue
 from xdsl.builder import Builder, InsertPoint
 
-from xdsl.dialects.llvm import FuncOp as LLVMFuncOp
-from xdsl.dialects.builtin import IntegerType
+from xdsl.dialects.llvm import FuncOp as LLVMFuncOp, LLVMPointerType
+from xdsl.dialects.builtin import IntegerType, f64, MemRefType
+from xdsl.dialects.stencil import FieldType, StencilBoundsAttr
 
-from ops_dialect import *
-from xdsl.dialects.llvm import LLVMFunctionType, LLVMPointerType, LLVMVoidType
-
+from ops_dialect import * 
 
 import ops_types
+
 class LowerParLoopPass(ModulePass):
     """
     Lower ops.par_loop to:
     1. Extraction operations (ops.extract_*)
     2. Memory operations (ops_dat data to memref)
-    3. Stencil operations (ops.compute to stencil eventually)
+    3. Compute operation (ops.compute)
     
     Input:
         ops.par_loop(%kernel, %block, %dim, %range, %ops_arg1) {
             <kernel computation body for stencil accesses>
         }
     """
-    
-    name = "lower-par-loop"
+
+    name = "lower-ops-par-loop"
     
     def apply(self, ctx, module):
-        # Walk through all ops.par_loop operations
+
         for func in module.walk():
             if not isinstance(func, LLVMFuncOp):
                 continue
@@ -48,19 +46,25 @@ class LowerParLoopPass(ModulePass):
         args_info = []
         for ops_arg in par_loop.args:
             # extract data from each arg_dat
+            # access = self.extract_arg_access(builder, ops_arg)
 
             dat = self.extract_arg_dat(builder, ops_arg)
-            access = self.extract_arg_access(builder, ops_arg)
 
-            args_info.append(dat)
+            # self.extract_arg_dat_size(builder, dat)
 
-            self.extract_arg_dat_data(builder, dat)
-            self.extract_arg_dat_size(builder, dat)
+            data = self.extract_arg_dat_data(builder, dat)
+
+            data_ref = self.create_ptr_to_ref(builder, data)
+
+            data_field = self.create_ref_to_field(builder, data_ref)
+
+            args_info.append(data_field)
+            args_info.append(data_ref)
 
         # detach par_loop body to use in ops.compute
         body = par_loop.detach_region(par_loop.body)
 
-        compute_op = builder.insert(ComputeOp.create(
+        builder.insert(ComputeOp.create(
             operands=[*args_info],
             regions=[body]
         ))
@@ -71,7 +75,6 @@ class LowerParLoopPass(ModulePass):
     def extract_block_info(self, builder, block_struct):
         """
         Extract info from ops_block
-        Returns: extracted values you need from the block
         """
 
         return builder.insert(ExtractBlockOp.create(
@@ -124,8 +127,8 @@ class LowerParLoopPass(ModulePass):
             result_types=[LLVMPointerType()]
         ))
 
-        op.result.name_hint = "data"
-        return op.results
+        op.result.name_hint = "data_ptr"
+        return op.result
     
 
     def extract_arg_dat_size(self, builder, ops_dat_struct):
@@ -151,4 +154,34 @@ class LowerParLoopPass(ModulePass):
         ))
 
         op.result.name_hint = "access_type"
+        return op.result
+
+    
+    def create_ptr_to_ref(self, builder, data_ptr):
+        """
+        Take the data pointer and put it in a placeholder
+        to convert to a memref
+        """
+
+        op = builder.insert(PointerToMemref.create(
+            operands=[data_ptr],
+            result_types=[MemRefType(f64, [8, 8])] 
+        ))
+
+        op.result.name_hint = "data_ref"
+        return op.result
+    
+
+    def create_ref_to_field(self, builder, data_ref):
+        """
+        Take the data memref and put it in a placeholder
+        to convert to a stencil.field
+        """
+
+        op = builder.insert(MemrefToStencilField.create(
+            operands=[data_ref],
+            result_types=[FieldType(StencilBoundsAttr([(-1, 7), (-1, 0)]), f64)] 
+        ))
+
+        op.result.name_hint = "data_field"
         return op.result

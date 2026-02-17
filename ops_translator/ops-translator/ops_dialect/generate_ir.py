@@ -23,6 +23,11 @@ from ops_dialect import *
 import ops_types
 
 
+from xdsl.dialects.builtin import ModuleOp, FunctionType, IndexType, IntegerType, NoneType
+from xdsl.dialects.func import FuncOp, ReturnOp
+from xdsl.ir import Block, Region
+from xdsl.builder import Builder, InsertPoint
+
 
 def create_function(kernel_name: str) -> ModuleOp:
     module = ModuleOp([])
@@ -71,6 +76,55 @@ def create_function(kernel_name: str) -> ModuleOp:
 
     builder1 = Builder(InsertPoint.at_end(entry_block))
     builder1.insert(llvm.ReturnOp())
+
+    return module
+
+
+def create_func_function(kernel_name: str) -> ModuleOp:
+    module = ModuleOp([])
+    builder = Builder(InsertPoint.at_start(module.body.block))
+
+    # ---- HIGH LEVEL TYPES ----
+    # replace raw pointers with abstract values
+    name_t = IndexType()                 # opaque debug token
+    block_t = IndexType()                # opaque handle
+    dim_t = IntegerType(32)
+    range_t = IndexType()                # opaque handle
+    arg_t = IndexType()                  # opaque handle
+
+    entry_block = Block(arg_types=[name_t, block_t, dim_t, range_t, arg_t])
+
+    # name hints
+    entry_block.args[0].name_hint = 'name'
+    entry_block.args[1].name_hint = 'block'
+    entry_block.args[2].name_hint = 'dim'
+    entry_block.args[3].name_hint = 'range'
+    entry_block.args[4].name_hint = 'ops_arg1'
+
+    # fn = FuncOp(
+    #     name="ops_par_loop_" + kernel_name,
+    #     function_type=FunctionType(
+    #         inputs=[name_t, block_t, dim_t, range_t, arg_t],
+    #         outputs=[]
+    #     ),
+    #     region=Region([entry_block]),
+    # )
+
+    fn = FuncOp(
+        name="ops_par_loop_" + kernel_name,
+        function_type=FunctionType.from_lists(
+            [name_t, block_t, dim_t, range_t, arg_t],
+            []
+        ),
+        region=Region([entry_block]),
+    )
+
+
+    builder.insert(fn)
+
+    # func.return (NOT llvm.return)
+    builder1 = Builder(InsertPoint.at_end(entry_block))
+    builder1.insert(ReturnOp())
 
     return module
 

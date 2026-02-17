@@ -2,7 +2,7 @@ from xdsl.passes import ModulePass
 from xdsl.builder import Builder, InsertPoint
 
 from xdsl.dialects.builtin import i64, DenseArrayBase, MemRefType, f64
-from xdsl.dialects import stencil
+from xdsl.dialects import stencil, memref
 
 from ops_dialect import *
 from xdsl.dialects.llvm import LLVMPointerType, ExtractValueOp
@@ -70,14 +70,21 @@ class LowerOpsExtractionsPass(ModulePass):
 
         # Convert pointer to memref
         total_size_0 = 8
-        total_size_1 = 8
+        total_size_1 = 1
 
         ref_type = MemRefType(f64, [total_size_0, total_size_1])
 
-        
-        ref = ptr.FromPtrOp(
-            op.operands[0], # data_ptr
-            ref_type
+
+        ref = memref.ReinterpretCastOp(
+            source=op.operands[0],  # Your !llvm.ptr
+            result_type=ref_type,
+            # These are attributes, not operands:
+            static_offsets=[0],
+            static_sizes=[8, 1],
+            static_strides=[1, 1],  # Row-major: stride[0] = num_cols, stride[1] = 1
+            offsets=[],
+            sizes=[],
+            strides=[]
         )
 
         ref.results[0].name_hint = "data_ref"
@@ -90,15 +97,31 @@ class LowerOpsExtractionsPass(ModulePass):
         op.erase()
 
 
+    # def lower_memref_to_field(self, op: MemrefToStencilField):
+
+    #     builder = Builder(InsertPoint.before(op))
+
+    #     external_load = stencil.ExternalLoadOp.get(op.operands[0], op.result_types[0])
+
+    #     builder.insert(external_load)
+
+    #     op.results[0].replace_by(external_load.results[0])
+    #     op.detach()
+    #     op.erase()
+
     def lower_memref_to_field(self, op: MemrefToStencilField):
-
+    
         builder = Builder(InsertPoint.before(op))
-
-        external_load = stencil.ExternalLoadOp.get(op.operands[0], op.result_types[0])
-
-        builder.insert(external_load)
-
-        op.results[0].replace_by(external_load.results[0])
+        
+        # Use stencil.cast instead of external_load
+        cast = stencil.CastOp(
+            operands=[op.operands[0]],
+            result_types=[op.result_types[0]]
+        )
+        
+        builder.insert(cast)
+        
+        op.results[0].replace_by(cast.results[0])
         op.detach()
         op.erase()
 

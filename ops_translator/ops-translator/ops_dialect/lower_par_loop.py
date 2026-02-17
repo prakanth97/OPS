@@ -5,6 +5,7 @@ from xdsl.dialects.llvm import FuncOp as LLVMFuncOp, LLVMPointerType
 from xdsl.dialects.builtin import IntegerType, f64, MemRefType
 from xdsl.dialects.stencil import FieldType, StencilBoundsAttr
 
+from xdsl.dialects.func import FuncOp as FuncFuncOp
 from ops_dialect import * 
 
 import ops_types
@@ -27,7 +28,7 @@ class LowerParLoopPass(ModulePass):
     def apply(self, ctx, module):
 
         for func in module.walk():
-            if not isinstance(func, LLVMFuncOp):
+            if not isinstance(func, FuncFuncOp) and not isinstance(func, LLVMFuncOp):
                 continue
             
             for op in list(func.walk()):
@@ -165,7 +166,7 @@ class LowerParLoopPass(ModulePass):
 
         op = builder.insert(PointerToMemref.create(
             operands=[data_ptr],
-            result_types=[MemRefType(f64, [8, 8])] 
+            result_types=[MemRefType(f64, [8, 1])] 
         ))
 
         op.result.name_hint = "data_ref"
@@ -180,7 +181,7 @@ class LowerParLoopPass(ModulePass):
 
         op = builder.insert(MemrefToStencilField.create(
             operands=[data_ref],
-            result_types=[FieldType(StencilBoundsAttr([(-1, 7), (-1, 0)]), f64)] 
+            result_types=[FieldType(StencilBoundsAttr([(0, 8), (0, 1)]), f64)] 
         ))
 
         op.result.name_hint = "data_field"

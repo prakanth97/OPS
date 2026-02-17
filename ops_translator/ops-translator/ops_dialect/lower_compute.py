@@ -5,11 +5,11 @@ from xdsl.builder import Builder, InsertPoint
 
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp
 from xdsl.dialects.builtin import IntegerType, f32, f64
-from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, ExternalStoreOp
+from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, StoreOp
 
 from ops_dialect import *
 from xdsl.dialects.llvm import LLVMFunctionType, LLVMPointerType, LLVMVoidType
-
+from xdsl.dialects.func import FuncOp as FuncFuncOp
 
 import ops_types
 class LowerComputePass(ModulePass):
@@ -27,7 +27,7 @@ class LowerComputePass(ModulePass):
     def apply(self, ctx, module):
 
         for func in module.walk():
-            if not isinstance(func, LLVMFuncOp):
+            if not isinstance(func, FuncFuncOp) and not isinstance(func, LLVMFuncOp):
                 continue
             
             for op in list(func.walk()):
@@ -39,7 +39,7 @@ class LowerComputePass(ModulePass):
         
         builder = Builder(InsertPoint.before(compute_op))
 
-        bottom_range_bounds = StencilBoundsAttr([(-1, 7), (-1, 0)])
+        bottom_range_bounds = StencilBoundsAttr([(0, 8), (0, 1)])
         
         temp_type = TempType(bottom_range_bounds, f64)
 
@@ -75,7 +75,7 @@ class LowerComputePass(ModulePass):
 
 
         apply_op = ApplyOp.get(
-            [load_op.results[0]],
+            [],# [load_op.results[0]],
             body,
             [temp_type],
             bottom_range_bounds
@@ -84,7 +84,7 @@ class LowerComputePass(ModulePass):
         apply_op.results[0].name_hint = "apply"
         builder.insert(apply_op)
 
-        external_store = ExternalStoreOp.build(operands=[apply_op.results[0], compute_op.operands[1]])
+        external_store = StoreOp.build(operands=[apply_op.results[0], compute_op.operands[0]])
         builder.insert(external_store)
 
         compute_op.detach()

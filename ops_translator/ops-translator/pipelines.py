@@ -9,12 +9,19 @@ class CPUSequential(Pipeline):
 
     def passes(self) -> List[str]:
         return [
+            "convert-bufferization-to-memref",
             "convert-scf-to-cf",
+            "convert-cf-to-llvm",
+            "canonicalize",
+            "cse",
             "lower-affine",
             "convert-arith-to-llvm",
             "convert-func-to-llvm",
+            "expand-strided-metadata",
             "finalize-memref-to-llvm",
             "reconcile-unrealized-casts",
+            "canonicalize",
+            "cse",
         ]
 
 

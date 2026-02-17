@@ -2,14 +2,15 @@ from util import Findable
 from language import Lang
 from strategy import Strategy
 from store import Application, Program
-from ops_dialect.generate_ir import create_function, add_ops_operations
+from generate_ir import create_function, add_ops_operations
 from xdsl.context import Context
-from ops_dialect.lower_par_loop import LowerParLoopPass
+from lower_par_loop import LowerParLoopPass
 from xdsl.printer import Printer
 from io import StringIO
 from mlir.passmanager import PassManager as MLIRPassManager
 from mlir import ir as mlir_ir
 import ops
+from typing import Tuple
 
 """Abstract class for a lowering pipeline"""
 
@@ -101,6 +102,9 @@ class Pipeline(Findable):
 
         return str(mlir_module)
 
+
+    def matches(self, key: Tuple[Lang, Strategy]) -> bool:
+        return self.lang == key[0] and self.strategy == key[1]
 
     def passes(self):
         pass

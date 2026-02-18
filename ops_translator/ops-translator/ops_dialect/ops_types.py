@@ -7,16 +7,6 @@ OPS_MAX_DIM = 5
 
 ops_block_type = LLVMPointerType()
 
-# ops_block_type = LLVMStructType(
-#         StringAttr("struct.ops_block"),  # struct_name
-#         ArrayAttr([
-#             IntegerType(32),   # index
-#             IntegerType(32),   # dims
-#             LLVMPointerType(), # name (char *)
-#             LLVMPointerType()  # OPS_instance struct (shouldn't be important)
-#         ]),
-#     )
-
 
 ops_dat_type = LLVMStructType(
     StringAttr("struct.ops_dat"),
@@ -61,7 +51,7 @@ ops_dat_type = LLVMStructType(
 ops_arg_type = LLVMStructType(
     StringAttr("struct.ops_arg"),
     ArrayAttr([
-        LLVMPointerType(), # 0: ops_dat (POINTER, not struct!)
+        LLVMPointerType(), # 0: ops_dat (POINTER)
         LLVMPointerType(), # 1: ops_stencil (POINTER)
         IntegerType(32),   # dim
         IntegerType(32),   # elem_size

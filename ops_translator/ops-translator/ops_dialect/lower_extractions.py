@@ -96,12 +96,11 @@ class LowerOpsExtractionsPass(ModulePass):
 
 
         ref = memref.ReinterpretCastOp(
-            source=op.operands[0],  # Your !llvm.ptr
+            source=op.operands[0],  # !llvm.ptr
             result_type=ref_type,
-            # These are attributes, not operands:
             static_offsets=[0],
             static_sizes=[8, 8],
-            static_strides=[8, 1],  # Row-major: stride[0] = num_cols, stride[1] = 1
+            static_strides=[8, 1],
             offsets=[],
             sizes=[],
             strides=[]

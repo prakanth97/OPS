@@ -14,6 +14,8 @@ from xdsl.printer import Printer
 from io import StringIO
 from mlir.passmanager import PassManager as MLIRPassManager
 from mlir import ir as mlir_ir
+from xdsl.passes import PassManager as xDSLPassManager
+
 import ops
 from typing import Tuple
 
@@ -61,29 +63,21 @@ class Pipeline(Findable):
         kernel_module = None
 
         # Build starting IR
+        xdsl_ctx = Context()
 
         ir_module = create_function(loop.kernel)
         ir_module = add_ops_operations(ir_module)
 
-        xdsl_ctx = Context()
 
-        new_pass = LowerParLoopPass()
-        new_pass.apply(xdsl_ctx, ir_module)
+        pm = xDSLPassManager()
+        pm.add_pass(LowerParLoopPass())
+        pm.add_pass(LowerComputePass())
+        pm.add_pass(LowerOpsExtractionsPass())
+        pm.add_pass(LowerPtrToMemrefPass())
+        pm.add_pass(StencilBufferize())
+        pm.add_pass(ConvertStencilToLLMLIRPass())
 
-        next_pass = LowerComputePass()
-        next_pass.apply(xdsl_ctx, ir_module)
-
-        yet_another_pass = LowerOpsExtractionsPass()
-        yet_another_pass.apply(xdsl_ctx, ir_module)
-
-        passi = LowerPtrToMemrefPass()
-        passi.apply(xdsl_ctx, ir_module)
-
-        bufferize_pass = StencilBufferize()
-        bufferize_pass.apply(xdsl_ctx, ir_module)
-
-        stencil_pass = ConvertStencilToLLMLIRPass()
-        stencil_pass.apply(xdsl_ctx, ir_module)
+        pm.apply(xdsl_ctx, ir_module)
 
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 

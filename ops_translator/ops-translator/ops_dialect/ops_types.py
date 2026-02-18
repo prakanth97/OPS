@@ -4,15 +4,18 @@ from xdsl.dialects.llvm import LLVMStructType, LLVMArrayType, LLVMPointerType, i
 # Max dimensions - as specified in the C/Fortran libraries
 OPS_MAX_DIM = 5
 
-ops_block_type = LLVMStructType(
-        StringAttr("struct.ops_block"),  # struct_name
-        ArrayAttr([
-            IntegerType(32),   # index
-            IntegerType(32),   # dims
-            LLVMPointerType(), # name (char *)
-            LLVMPointerType()  # OPS_instance struct (shouldn't be important)
-        ]),
-    )
+
+ops_block_type = LLVMPointerType()
+
+# ops_block_type = LLVMStructType(
+#         StringAttr("struct.ops_block"),  # struct_name
+#         ArrayAttr([
+#             IntegerType(32),   # index
+#             IntegerType(32),   # dims
+#             LLVMPointerType(), # name (char *)
+#             LLVMPointerType()  # OPS_instance struct (shouldn't be important)
+#         ]),
+#     )
 
 
 ops_dat_type = LLVMStructType(
@@ -58,14 +61,14 @@ ops_dat_type = LLVMStructType(
 ops_arg_type = LLVMStructType(
     StringAttr("struct.ops_arg"),
     ArrayAttr([
-        ops_dat_type,
-        # TODO: model ops_stencil
+        LLVMPointerType(), # 0: ops_dat (POINTER, not struct!)
+        LLVMPointerType(), # 1: ops_stencil (POINTER)
         IntegerType(32),   # dim
         IntegerType(32),   # elem_size
         LLVMPointerType(), # data (char *)
         LLVMPointerType(), # data_d (char *) - data on device for CUDA
-        IntegerType(32),    # ops_access type
-        # TODO: model ops_arg_type
+        IntegerType(32),   # ops_access type
+        IntegerType(32),   # ops_arg_type
         IntegerType(32)    # opt
     ])
 )

@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "ops_dialect"))
 
-from generate_ir import create_function, create_func_function, add_ops_operations
+from generate_ir import create_function_with_wrapper, add_ops_operations
 from xdsl.context import Context
 from lower_par_loop import LowerParLoopPass
 from lower_compute import LowerComputePass
@@ -22,7 +22,7 @@ def main():
 
     # initial code for testing passes to create set_zero kernel
 
-    llvm_module = create_function("set_zero")
+    llvm_module = create_function_with_wrapper("set_zero")
     ctx = Context()
 
     llvm_module = add_ops_operations(llvm_module)
@@ -43,25 +43,15 @@ def main():
     stencil_pass = ConvertStencilToLLMLIRPass()
     stencil_pass.apply(ctx, llvm_module)
 
-    # passi = ConvertPtrToLLVMPass()
-    # passi.apply(ctx, llvm_module)
-
-
-    passu = LowerPtrToMemrefPass()
-    passu.apply(ctx, llvm_module)
-
-
-    # print(llvm_module)
+    passi = LowerPtrToMemrefPass()
+    passi.apply(ctx, llvm_module)
 
 
     pipeline = pipelines.CPUSequential()
 
-
     mlir_module, mlir_ctx = pipeline.convertToMLIRModule(llvm_module)
 
     llvm_module = pipeline.run_mlir_passes(mlir_module, mlir_ctx)
-
-    # print(result)
 
     print(llvm_module)
 

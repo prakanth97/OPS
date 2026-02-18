@@ -28,6 +28,111 @@ from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Block, Region
 from xdsl.builder import Builder, InsertPoint
 
+def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
+    module = ModuleOp([])
+
+    builder = Builder(InsertPoint.at_start(module.body.block))  
+
+    param_types = [
+        LLVMPointerType(),
+        ops_types.ops_block_type,
+        IntegerType(32),
+        LLVMPointerType(),
+        ops_types.ops_arg_type
+    ]
+
+    entry_block = Block(arg_types=param_types)
+
+    # add name hints to fixed parameters
+    entry_block.args[0].name_hint = 'name'
+    entry_block.args[1].name_hint = 'block'
+    entry_block.args[2].name_hint = 'dim'
+    entry_block.args[3].name_hint = 'range'
+
+    for i in range(4, len(entry_block.args)):
+        entry_block.args[i].name_hint = 'ops_arg' + str(i - 3)
+
+    fn = LLVMFuncOp(
+        sym_name="ops_par_loop_" + kernel_name,
+        function_type=LLVMFunctionType(
+            inputs=param_types,
+            output=LLVMVoidType(),
+        ),
+        linkage=LinkageAttr("external"),
+        body=[Region([entry_block])],
+    )
+
+    builder.insert(fn)
+
+    builder1 = Builder(InsertPoint.at_end(entry_block))
+    builder1.insert(llvm.ReturnOp())
+
+    wrapper_fn = generate_c_wrapper(kernel_name, param_types, fn)
+
+    builder.insert(wrapper_fn)
+
+    return module
+
+
+def generate_c_wrapper(kernel_name: str, param_types: list, main_func: LLVMFuncOp) -> LLVMFuncOp:
+    """
+    Generate _mlir_ciface_ wrapper that converts pointer arguments to values
+    and calls the main function.
+    """
+    
+    wrapper_name = f"_mlir_ciface_ops_par_loop_{kernel_name}"
+    
+    # All parameters become pointers in the wrapper
+    wrapper_param_types = [LLVMPointerType()] * len(param_types)
+    
+    # Create wrapper entry block
+    wrapper_entry = Block(arg_types=wrapper_param_types)
+    
+    # Create wrapper function
+    wrapper_fn = LLVMFuncOp(
+        sym_name=wrapper_name,
+        function_type=LLVMFunctionType(
+            inputs=wrapper_param_types,
+            output=LLVMVoidType(),
+        ),
+        linkage=LinkageAttr("external"),
+        body=[Region([wrapper_entry])],
+    )
+    
+    # Build the wrapper body
+    builder = Builder(InsertPoint.at_end(wrapper_entry))
+    
+    # Track which params need loading:
+    # - param 0: LLVMPointerType (char*) - pass through
+    # - param 1: ops_block_type (pointer) - pass through
+    # - param 2: i32 - LOAD
+    # - param 3: LLVMPointerType (int*) - pass through
+    # - param 4: ops_arg_type (struct) - LOAD
+    
+    loaded_args = []
+    for i, param_type in enumerate(param_types):
+        arg_ptr = wrapper_entry.args[i]
+                
+        # Only load i32 and struct types, pass pointers through
+        if isinstance(param_type, (LLVMPointerType,)):
+            # Pass through pointers directly
+            loaded_args.append(arg_ptr)
+        else:
+            # Load value types (i32, struct)
+            loaded_op = builder.insert(llvm.LoadOp(arg_ptr, param_type))
+            loaded_args.append(loaded_op.results[0])
+    
+    # Call the main function
+    builder.insert(llvm.CallOp(
+        main_func.sym_name.data,
+        *loaded_args,
+        # return_type=LLVMVoidType(),
+    ))
+    
+    builder.insert(llvm.ReturnOp())
+    
+    return wrapper_fn
+
 
 def create_function(kernel_name: str) -> ModuleOp:
     module = ModuleOp([])

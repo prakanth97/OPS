@@ -107,11 +107,11 @@ class LowerPtrToMemrefPass(ModulePass):
         desc = builder.insert(llvm.InsertValueOp(
             DenseArrayBase.from_list(i64, [3,0]), desc, c8.results[0])).results[0]
         desc = builder.insert(llvm.InsertValueOp(
-            DenseArrayBase.from_list(i64, [3,1]), desc, c1.results[0])).results[0]
+            DenseArrayBase.from_list(i64, [3,1]), desc, c8.results[0])).results[0]
 
         # strides
         desc = builder.insert(llvm.InsertValueOp(
-            DenseArrayBase.from_list(i64, [4,0]), desc, c1.results[0])).results[0]
+            DenseArrayBase.from_list(i64, [4,0]), desc, c8.results[0])).results[0]
         desc = builder.insert(llvm.InsertValueOp(
             DenseArrayBase.from_list(i64, [4,1]), desc, c1.results[0])).results[0]
 

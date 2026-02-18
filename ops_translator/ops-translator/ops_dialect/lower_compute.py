@@ -39,7 +39,7 @@ class LowerComputePass(ModulePass):
         
         builder = Builder(InsertPoint.before(compute_op))
 
-        bottom_range_bounds = StencilBoundsAttr([(0, 8), (0, 1)])
+        bottom_range_bounds = StencilBoundsAttr([(0, 8), (0, 8)])
         
         temp_type = TempType(bottom_range_bounds, f64)
 

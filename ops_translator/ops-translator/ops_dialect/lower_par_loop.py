@@ -181,7 +181,7 @@ class LowerParLoopPass(ModulePass):
 
         op = builder.insert(MemrefToStencilField.create(
             operands=[data_ref],
-            result_types=[FieldType(StencilBoundsAttr([(0, 8), (0, 1)]), f64)] 
+            result_types=[FieldType(StencilBoundsAttr([(0, 8), (0, 8)]), f64)] 
         ))
 
         op.result.name_hint = "data_field"

@@ -16,8 +16,12 @@ from ops import OpsError, Type
 from scheme import Scheme
 from store import Application, ParseError
 from target import Target
+from strategy import Strategy
+from pipeline import Pipeline
 from util import getVersion, safeFind
 from util import create_cpp_main, replace_fortran_program_with_subroutine
+
+import ops
 
 def main(argv=None) -> None:
 
@@ -40,8 +44,8 @@ def main(argv=None) -> None:
 
     parser.add_argument("--file_paths", help="Input OPS sources", type=isFilePath, nargs="+")
 
-    target_names = [target.name for target in Target.all()] #TODO: implement Target Findable class
-    parser.add_argument("-t", "--target", help="Code-gereration target", type=str, action="append", nargs=1, choices=target_names, default=[])
+    strategy_names = [strategy.name for strategy in Strategy.all()]
+    parser.add_argument("-s", "--strategy", help="Code-generation strategy", type=str, action="append", nargs=1, choices=strategy_names, default=[])
 
     #invoking arg parser
     args = parser.parse_args(argv)
@@ -82,8 +86,8 @@ def main(argv=None) -> None:
 
     Type.set_formatter(lang.formatType)
 
-    if len(args.target) == 0:
-        args.target = [[target_name] for target_name in target_names]
+    if len(args.strategy) == 0:
+        args.strategy = [[strategy_name] for strategy_name in strategy_names]
 
     try:
         app = parse(args, lang)
@@ -150,30 +154,37 @@ def main(argv=None) -> None:
             file.writelines([item.ptr + '\n' for item in app_consts])
 
     # Generating code for targets
-    for [target] in args.target:
-        target = Target.find(target)
+
+    print(f"strategies: {args.strategy}")
+    for [strategy] in args.strategy:
+        strategy = Strategy.find(strategy)
+
+        print(strategy)
 
         # Applying user defined configs to the target config
-        for key in target.config:
-            if key in args.config:
-                target.config[key] = args.config[key]
+        # for key in target.config:
+        #     if key in args.config:
+        #         target.config[key] = args.config[key]
 
-        scheme = Scheme.find((lang, target))
+        pipeline = Pipeline.find(strategy)
 
-        if not scheme:
+        print(pipeline)
+
+
+        if not pipeline:
             if args.verbose:
-                print(f"No scheme register for {lang}/{target}")
+                print(f"No pipeline registered for {strategy}")
 
             continue
 
         if args.verbose:
-            print(f"Translation scheme: {scheme}")
+            print(f"Translation strategy: {strategy}")
 
-        print("Code-gen : Generating target specific template, scheme - " + scheme.target.name)
-        codegen(args, scheme, app, args.force_soa)
+        print("Code-gen : Generating strategy specific IR, strategy - " + strategy.name)
+        codegen(args, pipeline, app, args.force_soa)
 
         if args.verbose:
-            print(f"Translation completed: {scheme}")
+            print(f"Translation completed: {strategy}")
 
     # Create new constants.F90 file with relevant pragms for openmp offload for F90 version
     if(lang.name == "Fortran"):
@@ -219,86 +230,139 @@ def validate(args: Namespace, lang: Lang, app: Application) -> None:
             print("Dumped store: ", store_path.resolve(), end="\n\n")
 
 
-def codegen(args: Namespace, scheme: Scheme, app: Application, force_soa: bool = False) -> None:
+def codegen(args: Namespace, pipeline: Pipeline, app: Application, force_soa: bool = False) -> None:
     # Collect the paths of the generated files
     include_dirs = set([Path(dir) for [dir] in args.I])
     defines = [define for [define] in args.D]
 
-    # Generate loop hosts
+
+
+    # Extract needed details (test)
+
+    # print(app)
+
+    # program_path = app.programs[0].path
+    # print(f'Program path: {program_path}')
+
+    # cur_loop = app.programs[0].loops[10]
+    # kernel_name = cur_loop.kernel
+    # print(f'Kernel name: {kernel_name}') # gives "apply_stencil"
+
+    # print(cur_loop.dats)
+
+    # arg1 = cur_loop.args[0] # arg_dat
+
+    # dat_id_to_dat = {}
+
+    # for dat in cur_loop.dats:
+    #     dat_id_to_dat[dat.id] = dat
+
+    # # detect if ArgDat
+    # if (isinstance(arg1, ops.ArgDat)):
+    #     access_type = arg1.access_type
+    #     base_type = dat_id_to_dat[arg1.dat_id].typ
+
+    #     print(access_type) # AccessType.OPS_READ
+    #     print(base_type)   # double (C-style formatter)
+
+
+    # arg2 = cur_loop.args[1] # arg_dat
+    # if (isinstance(arg2, ops.ArgDat)):
+    #     access_type = arg2.access_type
+    #     base_type = dat_id_to_dat[arg1.dat_id].typ
+
+    #     print(access_type)
+    #     print(base_type)
+
+
+
+
+    # arg3 = cur_loop.args[2] # arg_reduce
+    # print(arg3)
+
+
+    # for stencil in cur_loop.stencils:
+    #     # stencil points and strides are set to 0 - which is a bit sht
+    #     print(stencil)
+    
+    # # ops_arg_dat_dim = app.programs[0].loops[0].block.dats[0].dim
+    # # print(f'Ops_arg_dat_dims: {ops_arg_dat_dim}')
+
+
+    # exit(0)
+
+
+    # Generate loop hosts --> IR for each kernel
     for i, (loop, program) in enumerate(app.uniqueLoops(), 1):
-        # Generate loop host source
-        source, extension, kernel_func = scheme.genLoopHost(include_dirs, defines, env, loop, program, app, i, force_soa)
 
-        new_source = re.sub(r'\n\s*\n', '\n\n', source)
+        # Generate IR for the kernel
+        new_source = pipeline.runPipeline(loop=loop, program=program, app=app, kernel_idx=i, force_soa=force_soa)
 
-        # From output files path
-        path = None
-        if scheme.lang.kernel_dir:
-            Path(args.out, scheme.target.name).mkdir(parents=True, exist_ok=True)
-            if(scheme.lang.name == "C++"):
-                path = Path(args.out, scheme.target.name, f"{loop.kernel}_kernel.{extension}")
-            else:
-                path = Path(args.out, scheme.target.name, f"{loop.kernel}_{scheme.target.suffix}_kernel.{extension}")
-        else:
-            path = Path(args.out,f"{loop.kernel}_{scheme.target.name}_kernel.{extension}")
+        # Form output files path
+        path = Path(args.out, pipeline.strategy.name, f"{loop.kernel}_kernel.mlir")
+        
+        # Create directory if it doesn't exist
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write the gernerated source file
         with open(path, "w") as file:
-            file.write(f"{scheme.lang.com_delim} Auto-generated at {datetime.now()} by ops-translator\n")
+            file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n\n")
             file.write(new_source)
 
             if args.verbose:
                 print(f"Generated loop host {i} of {len(app.uniqueLoops())}: {path}")
 
-        # F2C loop host CPP template
-        if scheme.loop_host_f2c_template is not None:
-            source, extension = scheme.genF2CLoopHost(include_dirs, defines, env, loop, program, app, i, force_soa, kernel_func)
+    # Generate the master kernel file using extern declarations
+    path = Path(args.out, "master_kernel.h")
 
-            new_source = re.sub(r'\n\s*\n', '\n\n', source)
-            # From output files path
-            path = None
-            if scheme.lang.kernel_dir:
-                Path(args.out, scheme.target.name).mkdir(parents=True, exist_ok=True)
-                path = Path(args.out, scheme.target.name, f"{loop.kernel}_{scheme.target.suffix}_kernel.{extension}")
+    with open(path, "w") as file:
+        file.write("#include \"ops_lib_core.h\"\n\n")
+    
+        for lh, p in app.uniqueLoops():
+            # Build the ops_par_loop function signature
+            # Format: ops_par_loop_<kernel>(const char*, ops_block, int, int*, ops_arg, ops_arg, ...)
+            
+            num_args = len(lh.args)
+            ops_args = ", ".join([f"ops_arg" for _ in range(num_args)])
+            
+            if num_args > 0:
+                signature = f'extern "C" void ops_par_loop_{lh.kernel}(const char* name, ops_block block, int dim, int* range, {ops_args});'
             else:
-                path = Path(args.out,f"{loop.kernel}_{scheme.target.name}_kernel.{extension}")
+                signature = f'extern "C" void ops_par_loop_{lh.kernel}(const char* name, ops_block block, int dim, int* range);'
+            
+            file.write(signature + "\n")
 
-            # Write the gernerated source file
-            with open(path, "w") as file:
-                file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n")
-                file.write(new_source)
 
-                if args.verbose:
-                    print(f"Generated loop host {i} of {len(app.uniqueLoops())}: {path}")
 
     # Gernerate master kernel file
-    if scheme.master_kernel_template is not None:
-        user_types_name = f"user_types.{scheme.lang.include_ext}"
-        user_types_candidates = [Path(dir, user_types_name) for dir in include_dirs]
-        user_types_file = safeFind(user_types_candidates, lambda p: p.is_file())
+    # if scheme.master_kernel_template is not None:
 
-        source, name = scheme.genMasterKernel(env, app, user_types_file, force_soa)
+    #     user_types_name = f"user_types.{scheme.lang.include_ext}"
+    #     user_types_candidates = [Path(dir, user_types_name) for dir in include_dirs]
+    #     user_types_file = safeFind(user_types_candidates, lambda p: p.is_file())
 
-        new_source = re.sub(r'\n\s*\n', '\n\n', source)
+    #     source, name = scheme.genMasterKernel(env, app, user_types_file, force_soa)
 
-        path = None
+    #     new_source = re.sub(r'\n\s*\n', '\n\n', source)
 
-        if scheme.lang.kernel_dir:
-            Path(args.out, scheme.target.name).mkdir(parents=True, exist_ok=True)
-            path = Path(args.out, scheme.target.name, name)
+    #     path = None
 
-        else:
-            path = Path(args.out, name)
+    #     if scheme.lang.kernel_dir:
+    #         Path(args.out, scheme.target.name).mkdir(parents=True, exist_ok=True)
+    #         path = Path(args.out, scheme.target.name, name)
 
-        with open(path, "w") as file:
-            if(scheme.target.name == "f2c_mpi_openmp" or scheme.target.name == "f2c_cuda" or scheme.target.name == "f2c_hip" or scheme.target.name == "f2c_sycl"):
-                file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n")
-            else:
-                file.write(f"{scheme.lang.com_delim} Auto-generated at {datetime.now()} by ops-translator\n")
-            file.write(new_source)
+    #     else:
+    #         path = Path(args.out, name)
 
-            if args.verbose:
-                print(f"Generated master kernel file: {path}")
+    #     with open(path, "w") as file:
+    #         if(scheme.target.name == "f2c_mpi_openmp" or scheme.target.name == "f2c_cuda" or scheme.target.name == "f2c_hip" or scheme.target.name == "f2c_sycl"):
+    #             file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n")
+    #         else:
+    #             file.write(f"{scheme.lang.com_delim} Auto-generated at {datetime.now()} by ops-translator\n")
+    #         file.write(new_source)
+
+    #         if args.verbose:
+    #             print(f"Generated master kernel file: {path}")
 
 
 def isDirPath(path):

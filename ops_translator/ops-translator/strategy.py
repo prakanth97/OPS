@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, Dict
 from util import Findable
 
 class Strategy(Findable):
@@ -19,12 +18,16 @@ class Strategy(Findable):
         return self.name == key.lower()
 
 
-class NVIDIAGPU(Strategy):
-    name = "cuda"
+class Sequential(Strategy):
+    name = "seq"
+
+class GPU_NVVM(Strategy):
+    name = "gpu_nvvm"
 
 class OpenMP(Strategy):
     name = "openmp"
 
 
-Strategy.register(NVIDIAGPU)
+Strategy.register(Sequential)
 Strategy.register(OpenMP)
+Strategy.register(GPU_NVVM)

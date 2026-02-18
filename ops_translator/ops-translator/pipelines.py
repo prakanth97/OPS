@@ -2,10 +2,13 @@ import os
 from typing import List
 from pipeline import Pipeline
 from typing import List, Optional
+from strategy import Strategy
 
 
 class CPUSequential(Pipeline):
     """Regular sequential CPU execution"""
+
+    strategy = Strategy.find("seq")
 
     def passes(self) -> List[str]:
         return [
@@ -25,8 +28,10 @@ class CPUSequential(Pipeline):
         ]
 
 
-class CPUOpenMP(Pipeline):
+class OpenMP(Pipeline):
     """OpenMP parallel CPU execution"""
+
+    strategy = Strategy.find("openmp")
     
     def passes(self) -> List[str]:
         return [
@@ -52,9 +57,18 @@ class CPUOpenMP(Pipeline):
 
 class GPUCUDA(Pipeline):
     """NVIDIA CUDA GPU execution"""
+
+    strategy = Strategy.find("gpu_nvvm")
     
     def __init__(self, gpu_sm: Optional[str] = None):
-        self.gpu_sm = gpu_sm or self._detect_gpu_sm()
+        self._gpu_sm = gpu_sm  # Don't auto-detect on initialisation
+    
+    @property
+    def gpu_sm(self) -> str:
+        """Lazy GPU compute capability detection."""
+        if self._gpu_sm is None:
+            self._gpu_sm = self._detect_gpu_sm()
+        return self._gpu_sm
     
     def passes(self) -> List[str]:
         nvvm_target = f"chip=sm_{self.gpu_sm},triple=nvptx64-nvidia-cuda"

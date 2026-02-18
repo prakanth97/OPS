@@ -7,11 +7,12 @@ from xdsl.dialects.llvm import FuncOp as LLVMFuncOp
 from xdsl.dialects.builtin import IntegerType, f32, f64
 from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, StoreOp
 
-from ops_dialect import *
+from .ops_dialect import *
 from xdsl.dialects.llvm import LLVMFunctionType, LLVMPointerType, LLVMVoidType
 from xdsl.dialects.func import FuncOp as FuncFuncOp
 
-import ops_types
+from .ops_types import *
+
 class LowerComputePass(ModulePass):
     """
     Lower ops.compute to Stencil operations

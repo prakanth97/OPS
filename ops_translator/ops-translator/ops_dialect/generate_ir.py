@@ -19,8 +19,8 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     IntegerType, 
 )
-from ops_dialect import *
-import ops_types
+from .ops_dialect import *
+from .ops_types import *
 
 
 from xdsl.dialects.builtin import ModuleOp, FunctionType, IndexType, IntegerType, NoneType
@@ -35,10 +35,10 @@ def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
 
     param_types = [
         LLVMPointerType(),
-        ops_types.ops_block_type,
+        ops_block_type,
         IntegerType(32),
         LLVMPointerType(),
-        ops_types.ops_arg_type
+        ops_arg_type
     ]
 
     entry_block = Block(arg_types=param_types)
@@ -142,10 +142,10 @@ def create_function(kernel_name: str) -> ModuleOp:
     entry_block = Block(
         arg_types=[
             LLVMPointerType(),
-            ops_types.ops_block_type,
+            ops_block_type,
             IntegerType(32),
             LLVMPointerType(),
-            ops_types.ops_arg_type,
+            ops_arg_type,
         ],
     )
 
@@ -163,10 +163,10 @@ def create_function(kernel_name: str) -> ModuleOp:
         function_type=LLVMFunctionType(
             inputs=[
                 LLVMPointerType(), # char pointer (i8) (kernel name for debugging)
-                ops_types.ops_block_type,
+                ops_block_type,
                 IntegerType(32),
                 LLVMPointerType(), # i32
-                ops_types.ops_arg_type
+                ops_arg_type
             ],
             output=LLVMVoidType(),
         ),

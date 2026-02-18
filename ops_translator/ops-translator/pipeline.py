@@ -1,10 +1,15 @@
 from util import Findable
-from language import Lang
 from strategy import Strategy
 from store import Application, Program
-from generate_ir import create_function, add_ops_operations
+from ops_dialect.generate_ir import create_function, add_ops_operations
 from xdsl.context import Context
-from lower_par_loop import LowerParLoopPass
+from ops_dialect.lower_par_loop import LowerParLoopPass
+from ops_dialect.lower_compute import LowerComputePass
+from ops_dialect.lower_extractions import LowerOpsExtractionsPass
+from ops_dialect.lower_ptr_to_memref import LowerPtrToMemrefPass
+from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
+from xdsl.transforms.stencil_bufferize import StencilBufferize
+
 from xdsl.printer import Printer
 from io import StringIO
 from mlir.passmanager import PassManager as MLIRPassManager
@@ -15,11 +20,10 @@ from typing import Tuple
 """Abstract class for a lowering pipeline"""
 
 class Pipeline(Findable):
-    lang: Lang
     strategy: Strategy
 
     def __str__(self) -> str:
-        return f"{self.lang.name}/{self.strategy.name}"
+        return self.strategy.name
     
     # Function to parse kernel details and return MLIR operations
     def parseKernelC(
@@ -47,23 +51,39 @@ class Pipeline(Findable):
         force_soa: bool
     ) -> str:
         # Translate the kernel
-        if (self.lang.name == "C++"):
-            kernel_module = self.parseKernelC(loop, kernel_idx)
+        # if (self.lang.name == "C++"):
+        #     kernel_module = self.parseKernelC(loop, kernel_idx)
 
-        elif (self.lang.name == "Fortran"):
-            kernel_module = self.parseKernelFortran(loop, kernel_idx)
+        # elif (self.lang.name == "Fortran"):
+        #     kernel_module = self.parseKernelFortran(loop, kernel_idx)
+
+        # TODO: implement kernel function parser
+        kernel_module = None
 
         # Build starting IR
 
         ir_module = create_function(loop.kernel)
-        ir_module = add_ops_operations(ir_module, kernel_module)
+        ir_module = add_ops_operations(ir_module)
 
-        new_pass = LowerParLoopPass()
         xdsl_ctx = Context()
 
+        new_pass = LowerParLoopPass()
         new_pass.apply(xdsl_ctx, ir_module)
 
-        # Lower fully to mlir dialects here...
+        next_pass = LowerComputePass()
+        next_pass.apply(xdsl_ctx, ir_module)
+
+        yet_another_pass = LowerOpsExtractionsPass()
+        yet_another_pass.apply(xdsl_ctx, ir_module)
+
+        passi = LowerPtrToMemrefPass()
+        passi.apply(xdsl_ctx, ir_module)
+
+        bufferize_pass = StencilBufferize()
+        bufferize_pass.apply(xdsl_ctx, ir_module)
+
+        stencil_pass = ConvertStencilToLLMLIRPass()
+        stencil_pass.apply(xdsl_ctx, ir_module)
 
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
@@ -103,9 +123,17 @@ class Pipeline(Findable):
         return str(mlir_module)
 
 
-    def matches(self, key: Tuple[Lang, Strategy]) -> bool:
-        return self.lang == key[0] and self.strategy == key[1]
+    def matches(self, strat: Strategy) -> bool:
+        return self.strategy == strat
 
     def passes(self):
         pass
 
+
+# Import and register concrete pipeline implementations
+# This happens automatically when the Pipeline class is imported
+from pipelines import CPUSequential, OpenMP, GPUCUDA
+
+Pipeline.register(CPUSequential)
+Pipeline.register(OpenMP)
+Pipeline.register(GPUCUDA)

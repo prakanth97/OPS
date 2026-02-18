@@ -4,11 +4,11 @@ from xdsl.builder import Builder, InsertPoint
 from xdsl.dialects.builtin import i64, DenseArrayBase, MemRefType, f64, IntegerAttr
 from xdsl.dialects import stencil, memref
 
-from ops_dialect import *
+from .ops_dialect import *
 from xdsl.dialects.llvm import LLVMPointerType, ExtractValueOp, GEPOp, LoadOp
 from xdsl.dialects import arith
 
-import ops_types
+from .ops_types import *
 
 class LowerOpsExtractionsPass(ModulePass):
     """Lower ops.extract_* operations to LLVM operations"""
@@ -60,7 +60,7 @@ class LowerOpsExtractionsPass(ModulePass):
         data_ptr_addr = builder.insert(GEPOp.from_mixed_indices(
             op.operands[0],  # ops_dat pointer
             indices=[0, 10],  # [0] to dereference, [10] to get field 10
-            pointee_type=ops_types.ops_dat_type,
+            pointee_type=ops_dat_type,
             result_type=LLVMPointerType()
         ))
         

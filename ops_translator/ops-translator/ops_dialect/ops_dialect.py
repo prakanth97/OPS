@@ -15,7 +15,7 @@ from xdsl.irdl import (
 from xdsl.dialects.llvm import LLVMArrayType, LLVMPointerType, i32
 from xdsl.dialects.builtin import StringAttr, IntegerType
  
-import ops_types
+from .ops_types import *
 
 
 @irdl_op_definition
@@ -39,7 +39,7 @@ class ExtractArgDatOp(IRDLOperation):
     result = result_def()
 
     def __init__(self, arg: SSAValue):
-        super().__init__(operands=[arg], result_types=[ops_types.ops_dat_type])
+        super().__init__(operands=[arg], result_types=[ops_dat_type])
 
 
 @irdl_op_definition
@@ -64,7 +64,7 @@ class ExtractArgDatSizeOp(IRDLOperation):
 
     def __init__(self, arg: SSAValue):
         super().__init__(operands=[arg], result_types=[LLVMArrayType.from_size_and_type(
-            ops_types.OPS_MAX_DIM, i32)
+            OPS_MAX_DIM, i32)
         ])
 
 

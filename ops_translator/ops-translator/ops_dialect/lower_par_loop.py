@@ -6,9 +6,9 @@ from xdsl.dialects.builtin import IntegerType, f64, MemRefType
 from xdsl.dialects.stencil import FieldType, StencilBoundsAttr
 
 from xdsl.dialects.func import FuncOp as FuncFuncOp
-from ops_dialect import * 
+from .ops_dialect import * 
 
-import ops_types
+from .ops_types import *
 
 class LowerParLoopPass(ModulePass):
     """
@@ -113,7 +113,7 @@ class LowerParLoopPass(ModulePass):
         """
         op = builder.insert(ExtractArgDatOp.create(
             operands=[ops_arg_struct],
-            result_types=[ops_types.ops_dat_type]
+            result_types=[ops_dat_type]
         ))
 
         op.result.name_hint = "dat"
@@ -139,7 +139,7 @@ class LowerParLoopPass(ModulePass):
         op = builder.insert(ExtractArgDatSizeOp.create(
             operands=[ops_dat_struct],
             result_types=[LLVMArrayType.from_size_and_type(
-            ops_types.OPS_MAX_DIM, i32)]
+            OPS_MAX_DIM, i32)]
         ))
 
         op.result.name_hint = "size"

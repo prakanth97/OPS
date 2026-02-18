@@ -100,6 +100,9 @@ class LowerPtrToMemrefPass(ModulePass):
             DenseArrayBase.from_list(i64, [1]), desc, ptr)).results[0]
 
         # offset
+        # note: the offset is not applied here, as when the memref is later casted to
+        # a stencil.field, the offset is not preserved
+        # instead, the offset is applied to the actual base pointer when loading it in
         desc = builder.insert(llvm.InsertValueOp(
             DenseArrayBase.from_list(i64, [2]), desc, c0.results[0])).results[0]
 

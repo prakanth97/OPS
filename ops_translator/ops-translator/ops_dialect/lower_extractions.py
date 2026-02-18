@@ -1,12 +1,12 @@
 from xdsl.passes import ModulePass
 from xdsl.builder import Builder, InsertPoint
 
-from xdsl.dialects.builtin import i64, DenseArrayBase, MemRefType, f64
+from xdsl.dialects.builtin import i64, DenseArrayBase, MemRefType, f64, IntegerAttr
 from xdsl.dialects import stencil, memref
 
 from ops_dialect import *
 from xdsl.dialects.llvm import LLVMPointerType, ExtractValueOp, GEPOp, LoadOp
-from xdsl.dialects import ptr
+from xdsl.dialects import arith
 
 import ops_types
 
@@ -23,27 +23,6 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
-    
-    # def lower_extract_arg_dat(self, op: ExtractArgDatOp):
-    #     """
-    #     Lower ops.extract_arg_dat to LLVM extractvalue
-        
-    #     Before: %dat = ops.extract_arg_dat(%ops_arg)
-    #     After:  %dat = llvm.extractvalue %ops_arg[0]
-    #     """
-    #     builder = Builder(InsertPoint.before(op))
-        
-    #     # ops_arg field 0 is ops_dat (passed by value in the struct)
-    #     dat = builder.insert(ExtractValueOp(
-    #         DenseArrayBase.from_list(i64, [0]),
-    #         op.operands[0],  # The ops_arg struct
-    #         op.results[0].type  # Result type (the ops_dat struct)
-    #     ))
-        
-    #     op.results[0].replace_by(dat.results[0])
-
-    #     op.detach()
-    #     op.erase()
 
     def lower_extract_arg_dat(self, op: ExtractArgDatOp):
         """
@@ -64,7 +43,7 @@ class LowerOpsExtractionsPass(ModulePass):
         op.results[0].replace_by(dat_ptr.results[0])
         op.detach()
         op.erase()
-        
+
     def lower_extract_arg_dat_data(self, op: ExtractArgDatDataOp):
         """
         Lower ops.extract_arg_dat_data to LLVM getelementptr + load
@@ -72,6 +51,8 @@ class LowerOpsExtractionsPass(ModulePass):
         Before: %data_ptr = ops.extract_arg_dat_data(%dat_ptr)
         After:  %data_ptr_addr = llvm.getelementptr %dat_ptr[0, 10]
                 %data_ptr = llvm.load %data_ptr_addr
+                %offset = arith.constant 72
+                %adjusted_ptr = llvm.getelementptr %data_ptr[%offset]
         """
         builder = Builder(InsertPoint.before(op))
         
@@ -79,7 +60,7 @@ class LowerOpsExtractionsPass(ModulePass):
         data_ptr_addr = builder.insert(GEPOp.from_mixed_indices(
             op.operands[0],  # ops_dat pointer
             indices=[0, 10],  # [0] to dereference, [10] to get field 10
-            pointee_type=ops_types.ops_dat_type,  # The struct type being pointed to
+            pointee_type=ops_types.ops_dat_type,
             result_type=LLVMPointerType()
         ))
         
@@ -89,7 +70,17 @@ class LowerOpsExtractionsPass(ModulePass):
             LLVMPointerType()
         ))
         
-        op.results[0].replace_by(data_ptr.results[0])
+        # Add offset to the pointer (72 bytes = 9 doubles for halo offset)
+        offset_const = builder.insert(arith.ConstantOp(IntegerAttr(72, i64)))
+        
+        adjusted_ptr = builder.insert(GEPOp.from_mixed_indices(
+            data_ptr.results[0],
+            indices=[offset_const.results[0]],  # dynamic offset
+            pointee_type=IntegerType(8),  # i8 for byte-level pointer offset arithmetic
+            result_type=LLVMPointerType(),
+        ))
+        
+        op.results[0].replace_by(adjusted_ptr.results[0])
         op.detach()
         op.erase()
 
@@ -125,18 +116,6 @@ class LowerOpsExtractionsPass(ModulePass):
         op.detach()
         op.erase()
 
-
-    # def lower_memref_to_field(self, op: MemrefToStencilField):
-
-    #     builder = Builder(InsertPoint.before(op))
-
-    #     external_load = stencil.ExternalLoadOp.get(op.operands[0], op.result_types[0])
-
-    #     builder.insert(external_load)
-
-    #     op.results[0].replace_by(external_load.results[0])
-    #     op.detach()
-    #     op.erase()
 
     def lower_memref_to_field(self, op: MemrefToStencilField):
     

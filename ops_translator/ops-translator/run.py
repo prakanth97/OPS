@@ -37,14 +37,15 @@ def main():
     yet_another_pass.apply(ctx, llvm_module)
 
     # try bufferize for when storing the result in input grid
+    passi = LowerPtrToMemrefPass()
+    passi.apply(ctx, llvm_module)
+
     bufferize_pass = StencilBufferize()
     bufferize_pass.apply(ctx, llvm_module)
 
     stencil_pass = ConvertStencilToLLMLIRPass()
     stencil_pass.apply(ctx, llvm_module)
 
-    passi = LowerPtrToMemrefPass()
-    passi.apply(ctx, llvm_module)
 
 
     pipeline = pipelines.CPUSequential()

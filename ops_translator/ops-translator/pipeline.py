@@ -1,7 +1,7 @@
 from util import Findable
 from strategy import Strategy
 from store import Application, Program
-from ops_dialect.generate_ir import create_function, add_ops_operations
+from ops_dialect.generate_ir import create_function_with_wrapper, add_ops_operations
 from xdsl.context import Context
 from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
@@ -14,7 +14,10 @@ from xdsl.printer import Printer
 from io import StringIO
 from mlir.passmanager import PassManager as MLIRPassManager
 from mlir import ir as mlir_ir
-from xdsl.passes import PassManager as xDSLPassManager
+
+from mlir.dialects.llvm import translate_module_to_llvmir
+
+from xdsl.passes import PassPipeline as xDSLPassManager
 
 import ops
 from typing import Tuple
@@ -65,17 +68,24 @@ class Pipeline(Findable):
         # Build starting IR
         xdsl_ctx = Context()
 
-        ir_module = create_function(loop.kernel)
+        ir_module = create_function_with_wrapper(loop.kernel)
         ir_module = add_ops_operations(ir_module)
 
 
-        pm = xDSLPassManager()
-        pm.add_pass(LowerParLoopPass())
-        pm.add_pass(LowerComputePass())
-        pm.add_pass(LowerOpsExtractionsPass())
-        pm.add_pass(LowerPtrToMemrefPass())
-        pm.add_pass(StencilBufferize())
-        pm.add_pass(ConvertStencilToLLMLIRPass())
+        pm = xDSLPassManager([
+            LowerParLoopPass(),
+            LowerComputePass(),
+            LowerOpsExtractionsPass(),
+            LowerPtrToMemrefPass(),
+            StencilBufferize(),
+            ConvertStencilToLLMLIRPass()
+        ])
+        # pm.add_pass(LowerParLoopPass())
+        # pm.add_pass(LowerComputePass())
+        # pm.add_pass(LowerOpsExtractionsPass())
+        # pm.add_pass(LowerPtrToMemrefPass())
+        # pm.add_pass(StencilBufferize())
+        # pm.add_pass(ConvertStencilToLLMLIRPass())
 
         pm.apply(xdsl_ctx, ir_module)
 
@@ -114,7 +124,15 @@ class Pipeline(Findable):
             pm.add(p)
         pm.run(op)
 
-        return str(mlir_module)
+
+        # equivalent to running mlir-translate
+        res = translate_module_to_llvmir(mlir_module.operation)
+
+        # Replace nuw to make compilation valid
+        # TODO: work out reason for this - I think compiler / mlir version mismatches
+        res = res.replace(" nuw ", " ")
+
+        return res
 
 
     def matches(self, strat: Strategy) -> bool:

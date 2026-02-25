@@ -28,14 +28,14 @@ class LowerComputePass(ModulePass):
     def apply(self, ctx, module):
 
         for func in module.walk():
-            if not isinstance(func, FuncFuncOp) and not isinstance(func, LLVMFuncOp):
+            if not isinstance(func, LLVMFuncOp):
                 continue
             
             for op in list(func.walk()):
                 if isinstance(op, ComputeOp):
-                    self.lower_par_loop(op)
+                    self.lower_compute(op)
     
-    def lower_par_loop(self, compute_op: ComputeOp):
+    def lower_compute(self, compute_op: ComputeOp):
         """Lower a single ops.compute operation"""
         
         builder = Builder(InsertPoint.before(compute_op))

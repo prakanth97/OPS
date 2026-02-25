@@ -15,7 +15,9 @@ class LowerOpsExtractionsPass(ModulePass):
     
     def apply(self, ctx, module):
         for op in list(module.walk()):
-            if isinstance(op, ExtractArgDatOp):
+            if isinstance(op, ExtractArgOp):
+                self.lower_extract_arg(op)
+            elif isinstance(op, ExtractArgDatOp):
                 self.lower_extract_arg_dat(op)
             elif isinstance(op, ExtractArgDatDataOp):
                 self.lower_extract_arg_dat_data(op)
@@ -23,6 +25,24 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
+
+    def lower_extract_arg(self, op: ExtractArgOp):
+        """
+        Lower ops.extract_arg to LLVM load
+        
+        Before: %arg = ops.extract_arg(%ops_arg)
+        After:  %arg = llvm.load ? %ops_arg[0]
+        """
+        builder = Builder(InsertPoint.before(op))
+        
+        arg = builder.insert(LoadOp(
+            op.operands[0],
+            ops_arg_type
+        ))
+        
+        op.results[0].replace_by(arg.results[0])
+        op.detach()
+        op.erase()
 
     def lower_extract_arg_dat(self, op: ExtractArgDatOp):
         """

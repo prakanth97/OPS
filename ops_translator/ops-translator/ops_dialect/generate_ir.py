@@ -28,7 +28,7 @@ from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Block, Region
 from xdsl.builder import Builder, InsertPoint
 
-def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
+def create_function_with_wrapper(function_name: str) -> ModuleOp:
     module = ModuleOp([])
 
     builder = Builder(InsertPoint.at_start(module.body.block))  
@@ -38,7 +38,7 @@ def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
         ops_block_type,
         IntegerType(32),
         LLVMPointerType(),
-        ops_arg_type
+        LLVMPointerType()
     ]
 
     entry_block = Block(arg_types=param_types)
@@ -53,7 +53,7 @@ def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
         entry_block.args[i].name_hint = 'ops_arg' + str(i - 3)
 
     fn = LLVMFuncOp(
-        sym_name="ops_par_loop_" + kernel_name,
+        sym_name=function_name + "_impl",
         function_type=LLVMFunctionType(
             inputs=param_types,
             output=LLVMVoidType(),
@@ -67,20 +67,18 @@ def create_function_with_wrapper(kernel_name: str) -> ModuleOp:
     builder1 = Builder(InsertPoint.at_end(entry_block))
     builder1.insert(llvm.ReturnOp())
 
-    wrapper_fn = generate_c_wrapper(kernel_name, param_types, fn)
+    wrapper_fn = generate_c_wrapper(function_name, param_types, fn)
 
     builder.insert(wrapper_fn)
 
     return module
 
 
-def generate_c_wrapper(kernel_name: str, param_types: list, main_func: LLVMFuncOp) -> LLVMFuncOp:
+def generate_c_wrapper(wrapper_name: str, param_types: list, main_func: LLVMFuncOp) -> LLVMFuncOp:
     """
     Generate _mlir_ciface_ wrapper that converts pointer arguments to values
     and calls the main function.
     """
-    
-    wrapper_name = f"_mlir_ciface_ops_par_loop_{kernel_name}"
     
     # All parameters become pointers in the wrapper
     wrapper_param_types = [LLVMPointerType()] * len(param_types)
@@ -114,7 +112,7 @@ def generate_c_wrapper(kernel_name: str, param_types: list, main_func: LLVMFuncO
         arg_ptr = wrapper_entry.args[i]
                 
         # Only load i32 and struct types, pass pointers through
-        if isinstance(param_type, (LLVMPointerType,)):
+        if isinstance(param_type, (LLVMPointerType)):
             # Pass through pointers directly
             loaded_args.append(arg_ptr)
         else:
@@ -133,105 +131,6 @@ def generate_c_wrapper(kernel_name: str, param_types: list, main_func: LLVMFuncO
     
     return wrapper_fn
 
-
-def create_function(kernel_name: str) -> ModuleOp:
-    module = ModuleOp([])
-
-    builder = Builder(InsertPoint.at_start(module.body.block))  
-
-    entry_block = Block(
-        arg_types=[
-            LLVMPointerType(),
-            ops_block_type,
-            IntegerType(32),
-            LLVMPointerType(),
-            ops_arg_type,
-        ],
-    )
-
-    # add name hints to fixed parameters
-    entry_block.args[0].name_hint = 'name'
-    entry_block.args[1].name_hint = 'block'
-    entry_block.args[2].name_hint = 'dim'
-    entry_block.args[3].name_hint = 'range'
-
-    for i in range(4, len(entry_block.args)):
-        entry_block.args[i].name_hint = 'ops_arg' + str(i - 3)
-
-    fn = LLVMFuncOp(
-        sym_name="ops_par_loop_" + kernel_name,
-        function_type=LLVMFunctionType(
-            inputs=[
-                LLVMPointerType(), # char pointer (i8) (kernel name for debugging)
-                ops_block_type,
-                IntegerType(32),
-                LLVMPointerType(), # i32
-                ops_arg_type
-            ],
-            output=LLVMVoidType(),
-        ),
-        linkage=LinkageAttr("external"),
-        body=[Region([entry_block])],
-        other_props={
-            "llvm.emit_c_interface": UnitAttr() # needs to be tested
-        }
-    )
-
-    builder.insert(fn)
-
-    builder1 = Builder(InsertPoint.at_end(entry_block))
-    builder1.insert(llvm.ReturnOp())
-
-    return module
-
-
-def create_func_function(kernel_name: str) -> ModuleOp:
-    module = ModuleOp([])
-    builder = Builder(InsertPoint.at_start(module.body.block))
-
-    # ---- HIGH LEVEL TYPES ----
-    # replace raw pointers with abstract values
-    name_t = IndexType()                 # opaque debug token
-    block_t = IndexType()                # opaque handle
-    dim_t = IntegerType(32)
-    range_t = IndexType()                # opaque handle
-    arg_t = IndexType()                  # opaque handle
-
-    entry_block = Block(arg_types=[name_t, block_t, dim_t, range_t, arg_t])
-
-    # name hints
-    entry_block.args[0].name_hint = 'name'
-    entry_block.args[1].name_hint = 'block'
-    entry_block.args[2].name_hint = 'dim'
-    entry_block.args[3].name_hint = 'range'
-    entry_block.args[4].name_hint = 'ops_arg1'
-
-    # fn = FuncOp(
-    #     name="ops_par_loop_" + kernel_name,
-    #     function_type=FunctionType(
-    #         inputs=[name_t, block_t, dim_t, range_t, arg_t],
-    #         outputs=[]
-    #     ),
-    #     region=Region([entry_block]),
-    # )
-
-    fn = FuncOp(
-        name="ops_par_loop_" + kernel_name,
-        function_type=FunctionType.from_lists(
-            [name_t, block_t, dim_t, range_t, arg_t],
-            []
-        ),
-        region=Region([entry_block]),
-    )
-
-
-    builder.insert(fn)
-
-    # func.return (NOT llvm.return)
-    builder1 = Builder(InsertPoint.at_end(entry_block))
-    builder1.insert(ReturnOp())
-
-    return module
 
 def create_par_loop(
     kernel_name_ptr: SSAValue,

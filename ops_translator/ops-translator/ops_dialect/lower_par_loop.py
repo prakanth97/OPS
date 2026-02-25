@@ -45,9 +45,11 @@ class LowerParLoopPass(ModulePass):
         # range_info = self.extract_range_info(builder, par_loop.range_ptr, dim_info)
 
         args_info = []
-        for ops_arg in par_loop.args:
+        for ops_arg_ptr in par_loop.args:
             # extract data from each arg_dat
             # access = self.extract_arg_access(builder, ops_arg)
+
+            ops_arg = self.extract_arg(builder, ops_arg_ptr)
 
             dat = self.extract_arg_dat(builder, ops_arg)
 
@@ -107,6 +109,18 @@ class LowerParLoopPass(ModulePass):
         op.result.name_hint = "range"
         return op.results
     
+    def extract_arg(self, builder, ops_arg_ptr):
+        """
+        Extract ops_arg from ops_arg*
+        """
+        op = builder.insert(ExtractArgOp.create(
+            operands=[ops_arg_ptr],
+            result_types=[ops_arg_type]
+        ))
+
+        op.result.name_hint = "arg"
+        return op.result
+
     def extract_arg_dat(self, builder, ops_arg_struct):
         """
         Extract arg_dat from ops_arg

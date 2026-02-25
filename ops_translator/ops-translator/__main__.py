@@ -20,8 +20,9 @@ from strategy import Strategy
 from pipeline import Pipeline
 from util import getVersion, safeFind
 from util import create_cpp_main, replace_fortran_program_with_subroutine
+from typing import Dict
 
-import ops
+
 
 def main(argv=None) -> None:
 
@@ -127,11 +128,14 @@ def main(argv=None) -> None:
 
     # Generate program translations
     print("Code-gen : Program translation phase started......")
+    loop_to_function_name = generate_function_names(app)
+
+
     for i, program in enumerate(app.programs, 1):
         include_dirs = set([Path(dir) for [dir] in args.I])
         defines = [define for [define] in args.D]
 
-        source = lang.translateProgram(program, include_dirs, defines, app_consts, args.force_soa, offload_pragma_flag_dict)
+        source = lang.translateProgram(program, include_dirs, defines, app_consts, loop_to_function_name, args.force_soa, offload_pragma_flag_dict)
 
         if not args.force_soa and program.soa_val:
             args.force_soa = program.soa_val
@@ -155,11 +159,8 @@ def main(argv=None) -> None:
 
     # Generating code for targets
 
-    print(f"strategies: {args.strategy}")
     for [strategy] in args.strategy:
         strategy = Strategy.find(strategy)
-
-        print(strategy)
 
         # Applying user defined configs to the target config
         # for key in target.config:
@@ -181,7 +182,7 @@ def main(argv=None) -> None:
             print(f"Translation strategy: {strategy}")
 
         print("Code-gen : Generating strategy specific IR, strategy - " + strategy.name)
-        codegen(args, pipeline, app, args.force_soa)
+        codegen(args, pipeline, app, loop_to_function_name, args.force_soa)
 
         if args.verbose:
             print(f"Translation completed: {strategy}")
@@ -230,7 +231,7 @@ def validate(args: Namespace, lang: Lang, app: Application) -> None:
             print("Dumped store: ", store_path.resolve(), end="\n\n")
 
 
-def codegen(args: Namespace, pipeline: Pipeline, app: Application, force_soa: bool = False) -> None:
+def codegen(args: Namespace, pipeline: Pipeline, app: Application, loop_to_function_name: Dict[str, str], force_soa: bool = False) -> None:
     # Collect the paths of the generated files
     include_dirs = set([Path(dir) for [dir] in args.I])
     defines = [define for [define] in args.D]
@@ -289,24 +290,25 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, force_soa: bo
     # # print(f'Ops_arg_dat_dims: {ops_arg_dat_dim}')
 
 
-    # exit(0)
-
+    kernel_configs = {} # function name -> config details
 
     # Generate loop hosts --> IR for each kernel
-    for i, (loop, program) in enumerate(app.uniqueLoops(), 1):
+    for i, (loop, program) in enumerate(app.loops(), 1):
+
+        function_name = loop_to_function_name[loop]
 
         # Generate IR for the kernel
-        new_source = pipeline.runPipeline(loop=loop, program=program, app=app, kernel_idx=i, force_soa=force_soa)
+        new_source = pipeline.runPipeline(loop=loop, program=program, app=app, function_name=function_name, force_soa=force_soa)
 
         # Form output files path
-        path = Path(args.out, pipeline.strategy.name, f"{loop.kernel}_kernel.mlir")
+        path = Path(args.out, pipeline.strategy.name, f"{loop.kernel}_kernel.ll")
         
         # Create directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write the gernerated source file
         with open(path, "w") as file:
-            file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n\n")
+            file.write(f"; Auto-generated at {datetime.now()} by ops-translator\n\n")
             file.write(new_source)
 
             if args.verbose:
@@ -318,23 +320,25 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, force_soa: bo
     with open(path, "w") as file:
         file.write("#include \"ops_lib_core.h\"\n\n")
     
-        for lh, p in app.uniqueLoops():
+        for lh, p in app.loops():
             # Build the ops_par_loop function signature
             # Format: ops_par_loop_<kernel>(const char*, ops_block, int, int*, ops_arg, ops_arg, ...)
             
+            function_name = loop_to_function_name[lh]
+
             num_args = len(lh.args)
             ops_args = ", ".join([f"ops_arg" for _ in range(num_args)])
             
             if num_args > 0:
-                signature = f'extern "C" void ops_par_loop_{lh.kernel}(const char* name, ops_block block, int dim, int* range, {ops_args});'
+                signature = f'extern "C" void {function_name}(const char* name, ops_block block, int dim, int* range, {ops_args});'
             else:
-                signature = f'extern "C" void ops_par_loop_{lh.kernel}(const char* name, ops_block block, int dim, int* range);'
+                signature = f'extern "C" void {function_name}(const char* name, ops_block block, int dim, int* range);'
             
             file.write(signature + "\n")
 
 
 
-    # Gernerate master kernel file
+    # Generate master kernel file
     # if scheme.master_kernel_template is not None:
 
     #     user_types_name = f"user_types.{scheme.lang.include_ext}"
@@ -377,6 +381,31 @@ def isFilePath(path):
     else:
         raise ArgumentTypeError("Invalid file: {path}")
 
+
+def generate_function_names(app):
+    kernel_configs = {}
+    kernel_counters = {}
+    loop_to_function_name = {}
+    
+    for i, (loop, _) in enumerate(app.loops(), 1):
+        kernel_name = loop.kernel
+        
+        if kernel_name not in kernel_counters:
+            kernel_counters[kernel_name] = 0
+        
+        config_id = kernel_counters[kernel_name]
+        kernel_counters[kernel_name] += 1
+        
+        function_name = f"ops_par_loop_{kernel_name}_{config_id}"
+        
+        loop_to_function_name[loop] = function_name
+        kernel_configs[function_name] = {
+            "kernel_name": kernel_name,
+            "config_id": config_id,
+            "original_index": i
+        }
+    
+    return loop_to_function_name
     
 
 if __name__ == "__main__":

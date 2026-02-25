@@ -52,7 +52,7 @@ class Pipeline(Findable):
         loop: ops.Loop,
         program: Program,
         app: Application,
-        kernel_idx: int,
+        function_name: str,
         force_soa: bool
     ) -> str:
         # Translate the kernel
@@ -68,7 +68,7 @@ class Pipeline(Findable):
         # Build starting IR
         xdsl_ctx = Context()
 
-        ir_module = create_function_with_wrapper(loop.kernel)
+        ir_module = create_function_with_wrapper(function_name)
         ir_module = add_ops_operations(ir_module)
 
 
@@ -80,12 +80,6 @@ class Pipeline(Findable):
             StencilBufferize(),
             ConvertStencilToLLMLIRPass()
         ])
-        # pm.add_pass(LowerParLoopPass())
-        # pm.add_pass(LowerComputePass())
-        # pm.add_pass(LowerOpsExtractionsPass())
-        # pm.add_pass(LowerPtrToMemrefPass())
-        # pm.add_pass(StencilBufferize())
-        # pm.add_pass(ConvertStencilToLLMLIRPass())
 
         pm.apply(xdsl_ctx, ir_module)
 
@@ -98,7 +92,7 @@ class Pipeline(Findable):
     
 
     def convertToMLIRModule(self, xdsl_module) -> str:
-        """Convert an xDSL module to MLIR textual representation."""
+        """Convert an xDSL module to MLIR module."""
         buf = StringIO()
         Printer(stream=buf).print_op(xdsl_module)
 

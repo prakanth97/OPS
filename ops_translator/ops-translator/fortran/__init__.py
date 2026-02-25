@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import FrozenSet, List, Optional, Set, Tuple
+from typing import FrozenSet, List, Optional, Set, Tuple, Dict
 
 import fparser.two.Fortran2003 as f2003
 import fparser.two.utils
@@ -214,7 +214,7 @@ class Fortran(Lang):
         ast, source = self.parseFile(path, frozenset(include_dirs), frozenset(defines))
         return fortran.parser.parseProgram(ast, source, path)
 
-    def translateProgram(self, program: Program, include_dirs: Set[Path], defines: List[str], app_consts: List[OPS.Const], force_soa: bool, offload_pragma_flag_dict) -> str:
+    def translateProgram(self, program: Program, include_dirs: Set[Path], defines: List[str], app_consts: List[OPS.Const], loop_to_function_name: Dict[str,str], force_soa: bool, offload_pragma_flag_dict) -> str:
         #if self.use_regex_translator:
         #    return fortran.translator.program.translateProgram2(program, force_soa)
 

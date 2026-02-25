@@ -31,6 +31,17 @@ class ExtractArgTypeOp(IRDLOperation):
 
 
 @irdl_op_definition
+class ExtractArgOp(IRDLOperation):
+    name = "ops.extract_arg"
+    
+    ops_arg = operand_def(Attribute)
+
+    result = result_def()
+
+    def __init__(self, arg: SSAValue):
+        super().__init__(operands=[arg], result_types=[ops_arg_type])
+
+@irdl_op_definition
 class ExtractArgDatOp(IRDLOperation):
     name = "ops.extract_arg_dat"
     

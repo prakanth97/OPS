@@ -169,6 +169,11 @@ class MemrefToStencilField(IRDLOperation):
     ref = operand_def()
     result = result_def()
 
+@irdl_op_definition
+class StencilFieldToTemp(IRDLOperation):
+    name = "ops.field_to_temp"
+    ref = operand_def()
+    result = result_def()
 
 @irdl_op_definition
 class ComputeOp(IRDLOperation):

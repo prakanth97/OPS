@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union, Tuple
+
 
 from util import ABDC, findIdx
 import re
 
 if TYPE_CHECKING:
     from store import Location
+
 
 class AccessType(Enum):
     OPS_READ = 0
@@ -43,6 +45,7 @@ class OpsError(Exception):
         self.loc = loc
 
     def __str__(self) -> str:
+
         if self.loc:
             return f"{self.loc}: OPS Error: {self.message}"
         else:
@@ -153,11 +156,12 @@ class Const:
 class Range:
     loc: Location
     ptr: str
-
     dim: int
+    bounds: List[int]
+
 
     def __str__(self) -> str:
-        return f"Range(loc={self.loc}, ptr='{self.ptr}', dim={self.dim})"
+        return f"Range(loc={self.loc}, ptr='{self.ptr}', dim={self.dim}, bounds={self.bounds})"
 
 
 @dataclass(frozen=True)
@@ -166,13 +170,15 @@ class Dat:
 
     ptr: str
     dim: int
-    # size: List[int]
-    # base: List[int]
-    # d_m: List[int]
-    # d_p: List[int]
 
+    
     typ: Type
     soa: bool
+
+    size: List[int]
+    base: List[int]
+    d_m: List[int]
+    d_p: List[int]
 
     block_id: Optional(int) = field(default_factory=int)
     name: Optional(str) = field(default_factory=str)
@@ -188,7 +194,7 @@ class Dat:
     #         OpsError(f"dim of d_p={self.d_p} is not same as dat dim={self.dim} of dat='{self.name}'")
 
     def __str__(self) -> str:
-        return f"Dat(block_id={self.block_id}, id={self.id}, ptr='{self.ptr}', dim={self.dim}, type={self.typ}, soa={self.soa})"
+        return f"Dat(block_id={self.block_id}, id={self.id}, ptr='{self.ptr}', dim={self.dim}, type={self.typ}, soa={self.soa}, size={self.size}. base={self.base}, d_m={self.d_m}, d_p={self.d_p})"
 
 
 @dataclass(frozen=True)
@@ -203,7 +209,7 @@ class Stencil:
 
     def __str__(self) -> str:
         return f"Stencil(id={self.id}, dim={self.dim}, stencil_ptr='{self.stencil_ptr}', \
-            points={self.points}, stride_ptr='{self.stride_ptr}')"
+            points={self.points}, stride='{self.stride}')"
 
 
 @dataclass(frozen=True)
@@ -276,7 +282,7 @@ class ArgIdx(Arg):
     pass
 
     def __str__(self) -> str:
-        return f"ArgIdx(id={self.id}, loc={self.loc})"    
+        return f"ArgIdx(id={self.id}, loc={self.loc})"
 
 
 class Block:
@@ -299,7 +305,7 @@ class Block:
         if len(self.dats) > 0:
             dat_str = f"\n    {dat_str}\n"
 
-        return f"Block(id={self.id}, loc={self.loc}, ptr='{self.ptr}', dim={self.dim}, dats={dat_str})"
+        return f"Block(loc={self.loc}, ptr='{self.ptr}', dim={self.dim}, dats={dat_str})"
 
     def addDat(self, dat: Dat):
         dat_id = findIdx(self.dats, lambda d: d.ptr == dat.ptr)
@@ -352,7 +358,8 @@ class Loop:
         dat_soa: bool,
         stencil_ptr: str,
         access_type: AccessType,
-         opt: bool
+        opt: bool,
+        dat_info: Tuple
     ) -> None: 
 
         arg_id = len(self.args)
@@ -361,7 +368,7 @@ class Loop:
         if dat_id is None:
             dat_id = len(self.dats)
             # if findIdx(self.block.dats, lambda d: d.ptr == dat_ptr) is not None:
-            self.dats.append(Dat(dat_id, dat_ptr, dat_dim, dat_typ, dat_soa))
+            self.dats.append(Dat(dat_id, dat_ptr, dat_dim, dat_typ, dat_soa, dat_info[0], dat_info[1], dat_info[2], dat_info[3]))
             # else:
             #     OpsError(f"Parsing Dat='{dat_ptr}' as argument of loop in {self.loc} which is not belong to block='{self.block.ptr}'", loc)
 

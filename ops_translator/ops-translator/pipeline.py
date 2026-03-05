@@ -9,6 +9,11 @@ from ops_dialect.lower_extractions import LowerOpsExtractionsPass
 from ops_dialect.lower_ptr_to_memref import LowerPtrToMemrefPass
 from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
 from xdsl.transforms.stencil_bufferize import StencilBufferize
+from xdsl.transforms.canonicalize import CanonicalizePass
+from kernel_config import KernelConfig, attachKernelInfo
+from language import Lang
+
+from ops_dialect.lower_remove_loads import RemoveUnusedStencilLoads
 
 from xdsl.printer import Printer
 from io import StringIO
@@ -21,70 +26,79 @@ from xdsl.passes import PassPipeline as xDSLPassManager
 
 import ops
 from typing import Tuple
+from kernel_parser import KernelParser
 
 """Abstract class for a lowering pipeline"""
 
 class Pipeline(Findable):
     strategy: Strategy
+    kernel_parser = KernelParser()
 
     def __str__(self) -> str:
         return self.strategy.name
-    
-    # Function to parse kernel details and return MLIR operations
-    def parseKernelC(
-        self,
-        loop: ops.Loop,
-        kernel_idx: int
-    ) -> str:
-        # To be implemented
-        pass
-
-    def parseKernelFortran(
-        self,
-        loop: ops.Loop,
-        kernel_idx: int
-    ) -> str:
-        # To be implemented
-        pass
     
     def runPipeline(
         self,
         loop: ops.Loop,
         program: Program,
         app: Application,
-        function_name: str,
+        lang: Lang,
+        kernel_config: KernelConfig,
         force_soa: bool
     ) -> str:
+        
         # Translate the kernel
-        # if (self.lang.name == "C++"):
-        #     kernel_module = self.parseKernelC(loop, kernel_idx)
+        if (lang.name == "C++"):
+            kernel_info = self.kernel_parser.parseC(loop, program, app)
 
-        # elif (self.lang.name == "Fortran"):
-        #     kernel_module = self.parseKernelFortran(loop, kernel_idx)
+        elif (lang.name == "Fortran"):
+            # TODO: Work on Fortran parser
+            kernel_info = self.kernel_parser.parseFortran(loop, program, app)
 
-        # TODO: implement kernel function parser
-        kernel_module = None
+        print(kernel_info)
+
+        attachKernelInfo(kernel_config, kernel_info)
+
+        kernel_config.kernel_info = kernel_info
+
+        print("Parsed kernel module:")
+        print(kernel_info)
+
+        # self.kernel_parser.kernel_info_to_stencil_ops(kernel_info)
+        print(kernel_info)
+        # kernel_module = None
 
         # Build starting IR
         xdsl_ctx = Context()
 
-        ir_module = create_function_with_wrapper(function_name)
+        ir_module = create_function_with_wrapper(kernel_config)
         ir_module = add_ops_operations(ir_module)
 
 
         pm = xDSLPassManager([
-            LowerParLoopPass(),
-            LowerComputePass(),
+            LowerParLoopPass(kernel_config),
+            LowerComputePass(kernel_config),
             LowerOpsExtractionsPass(),
             LowerPtrToMemrefPass(),
             StencilBufferize(),
-            ConvertStencilToLLMLIRPass()
+            ConvertStencilToLLMLIRPass(),
+            CanonicalizePass(),
         ])
 
         pm.apply(xdsl_ctx, ir_module)
 
+        print(ir_module)
+
+
+        with open("demofile.txt", "w") as f:
+            f.write(str(ir_module))
+
+        # return None
+        # return ir_module
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
+        # print(mlir_module)
+        # return None
         # Do strategy-specific lowering
         result = self.run_mlir_passes(mlir_module, mlir_ctx)
 
@@ -117,6 +131,8 @@ class Pipeline(Findable):
         for p in passes:
             pm.add(p)
         pm.run(op)
+
+        print(mlir_module)
 
 
         # equivalent to running mlir-translate

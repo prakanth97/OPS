@@ -3,10 +3,12 @@ from xdsl.builder import Builder, InsertPoint
 
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp, LLVMPointerType
 from xdsl.dialects.builtin import IntegerType, f64, MemRefType
-from xdsl.dialects.stencil import FieldType, StencilBoundsAttr
+from xdsl.dialects.stencil import FieldType, StencilBoundsAttr, TempType
 
 from xdsl.dialects.func import FuncOp as FuncFuncOp
 from .ops_dialect import * 
+
+from kernel_config import KernelConfig
 
 from .ops_types import *
 
@@ -24,6 +26,11 @@ class LowerParLoopPass(ModulePass):
     """
 
     name = "lower-ops-par-loop"
+
+    def __init__(self, config: KernelConfig):
+        self.config = config
+        print(f"LowerParLoopPass initialized with config: {config.name}, bounds: {config.iteration_bounds}")
+
     
     def apply(self, ctx, module):
 
@@ -61,15 +68,13 @@ class LowerParLoopPass(ModulePass):
 
             data_field = self.create_ref_to_field(builder, data_ref)
 
-            args_info.append(data_field)
-            args_info.append(data_ref)
+            data_temp = self.create_field_to_temp(builder, data_field)
 
-        # detach par_loop body to use in ops.compute
-        body = par_loop.detach_region(par_loop.body)
+            args_info.append(data_temp)
+            args_info.append(data_field)
 
         builder.insert(ComputeOp.create(
             operands=[*args_info],
-            regions=[body]
         ))
 
         par_loop.detach()
@@ -199,4 +204,19 @@ class LowerParLoopPass(ModulePass):
         ))
 
         op.result.name_hint = "data_field"
+        return op.result
+
+
+    def create_field_to_temp(self, builder, data_ref):
+        """
+        Take the data field and put it in a placeholder
+        to convert to a stencil.temp
+        """
+
+        op = builder.insert(StencilFieldToTemp.create(
+            operands=[data_ref],
+            result_types=[TempType(self.config.grid_size, f64)] 
+        ))
+
+        op.result.name_hint = "data_temp"
         return op.result

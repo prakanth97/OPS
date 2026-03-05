@@ -7,6 +7,114 @@ from clang.cindex import Cursor, CursorKind, TranslationUnit, TypeKind, conf
 import ops
 from store import Function, Location, ParseError, Program, Type
 from util import safeFind #TODO: implement safe find
+from dataclasses import dataclass
+
+
+class ConstantEvaluator:
+    def __init__(self):
+        self.constants = {}  # var_name -> value
+    
+    def register_constant(self, name: str, node: Cursor):
+        """Store both name and AST node for lazy evaluation"""
+        self.constants[name] = node
+    
+    def evaluate(self, node: Cursor, depth: int = 0) -> Optional[int]:
+        """Recursively evaluate with cycle detection"""
+        
+        # Prevent infinite recursion
+        if depth > 10:
+            return None
+
+        # Handle UNEXPOSED_EXPR by unwrapping to first child
+        if node.kind == CursorKind.UNEXPOSED_EXPR:
+            children = list(node.get_children())
+            if children:
+                return self.evaluate(children[0], depth)
+            return None
+        
+        if node.kind == CursorKind.INTEGER_LITERAL:
+            tokens = list(node.get_tokens())
+            return int(tokens[0].spelling)
+        
+        elif node.kind == CursorKind.UNARY_OPERATOR:
+            children = list(node.get_children())
+            if not children:
+                return None
+            
+            val = self.evaluate(children[0], depth + 1)
+            if val is None:
+                return None
+            
+            # Determine operator
+            tokens = list(node.get_tokens())
+            op = tokens[0].spelling
+            
+            if op == '-':
+                return -val
+            elif op == '+':
+                return val
+            return None
+        
+        elif node.kind == CursorKind.BINARY_OPERATOR:
+            # print(f"{'  ' * depth}Evaluating BINARY_OPERATOR")
+            children = list(node.get_children())
+            # print(f"{'  ' * depth}  Has {len(children)} children")
+            
+            if len(children) != 2:
+                # print(f"{'  ' * depth}  Wrong number of children!")
+                return None
+            
+            # print(f"{'  ' * depth}  Left child: {children[0].kind}, spelling: {children[0].spelling}")
+            left = self.evaluate(children[0], depth + 1)
+            # print(f"{'  ' * depth}  Left result: {left}")
+            
+            # print(f"{'  ' * depth}  Right child: {children[1].kind}, spelling: {children[1].spelling}")
+            right = self.evaluate(children[1], depth + 1)
+            # print(f"{'  ' * depth}  Right result: {right}")
+
+            if left is None or right is None:
+                # print(f"{'  ' * depth}  One side is None!")
+                return None
+                
+            
+            # Find operator token
+            tokens = list(node.get_tokens())
+            # print(f"{'  ' * depth}  Tokens: {[t.spelling for t in tokens]}")
+            left_tokens = list(children[0].get_tokens())
+            # print(f"{'  ' * depth}  Left tokens: {[t.spelling for t in left_tokens]}")
+            
+            op_idx = len(left_tokens)
+            if op_idx < len(tokens):
+                op = tokens[op_idx].spelling
+                # print(f"{'  ' * depth}  Operator: {op}")
+                
+                if op == '+': return left + right
+                elif op == '-': return left - right
+                elif op == '*': return left * right
+                elif op == '/': return left // right if right != 0 else None
+            
+            return None
+        
+        elif node.kind == CursorKind.DECL_REF_EXPR:
+            # Variable reference - RECURSIVELY evaluate its definition
+            var_name = node.spelling
+            
+            if var_name not in self.constants:
+                return None
+            
+            # Get the definition node and evaluate it
+            definition = self.constants[var_name]
+            return self.evaluate(definition, depth + 1)
+        
+        elif node.kind == CursorKind.PAREN_EXPR:
+            # Just unwrap parentheses
+            children = list(node.get_children())
+            if children:
+                return self.evaluate(children[0], depth + 1)
+            return None
+        
+        return None
+
 
 def parseMeta(node: Cursor, program: Program) -> None:
     if node.kind == CursorKind.TYPE_REF:
@@ -89,6 +197,11 @@ def parseLoops(translation_unit: TranslationUnit, program: Program) -> None:
     macros: Dict[Location, str] = {}
     nodes: List[Cursor] = []
 
+    evaluator = ConstantEvaluator()
+    extract_constants_from_file(translation_unit.cursor, evaluator)
+
+    dat_registry = find_and_parse_dat_decls(translation_unit.cursor, evaluator)
+
     for node in translation_unit.cursor.get_children():
 
         if node.kind == CursorKind.MACRO_DEFINITION:
@@ -106,7 +219,7 @@ def parseLoops(translation_unit: TranslationUnit, program: Program) -> None:
     for node in nodes:
         for child in node.walk_preorder():
             if child.kind.is_unexposed():
-                parseCall(child, macros, program)
+                parseCall(translation_unit, child, macros, program, evaluator, dat_registry)
 
     return program
 
@@ -136,7 +249,7 @@ def parseUnexposedFunction(node: Cursor) -> Union[Tuple[str, List[Cursor]], None
     return (name, args)
 
 
-def parseCall(node: Cursor, macros: Dict[Location, str], program: Program) -> None:
+def parseCall(translation_unit: TranslationUnit, node: Cursor, macros: Dict[Location, str], program: Program, evaluator: ConstantEvaluator, dat_registry: Dict[str, Tuple]) -> None:
 
     if parseUnexposedFunction(node) == None:
         return
@@ -149,7 +262,7 @@ def parseCall(node: Cursor, macros: Dict[Location, str], program: Program) -> No
         program.consts.append(parseConst(args, loc, macros))
 
     elif name == "ops_par_loop":
-        loop = parseLoop(args, loc, macros)
+        loop = parseLoop(translation_unit, args, loc, macros, evaluator, dat_registry)
         program.loops.append(loop)
 
         if program.ndim == None:
@@ -318,7 +431,7 @@ def parseAccessType(node: Cursor, loc: Location, macros: Dict[Location, str]) ->
         return ops.AccessType(access_type_raw)
 
 
-def parseArgDat(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[Location, str]) -> None:
+def parseArgDat(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[Location, str], evaluator: ConstantEvaluator, dat_registry: Dict[str, Tuple]) -> None:
     if len(args) != 5:
         raise ParseError(f"Incorrect number({len(args)}) of args passed to ops_arg_dat", loc)
 
@@ -328,7 +441,15 @@ def parseArgDat(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[
     dat_typ, dat_soa = parseType(parseStringLit(args[3]), loc)
     access_type = parseAccessType(args[4], loc, macros)
 
-    loop.addArgDat(loc, dat_ptr, dim, dat_typ, dat_soa, stencil_ptr, access_type, True)
+    # Look up the dat info from registry
+    if dat_ptr in dat_registry:
+        dat_info = dat_registry[dat_ptr]
+        print(f"Found dat {dat_ptr}: size={dat_info[0]}, base={dat_info[1]}, d_m={dat_info[2]}, d_p={dat_info[3]}")
+    else:
+        print(f"Warning: Could not find declaration for dat {dat_ptr}")
+        dat_info = None
+
+    loop.addArgDat(loc, dat_ptr, dim, dat_typ, dat_soa, stencil_ptr, access_type, True, dat_info)
 
 
 def parseArgDatOpt(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[Location, str]) -> None:
@@ -363,10 +484,68 @@ def parseBlock(node: Cursor, dim: int) -> ops.Block:
     return ops.Block(loc, ptr, dim)
 
 
-def parseRange(node: Cursor, dim: int) -> ops.Range:
+def parseRange(node: Cursor, dim: int, evaluator: ConstantEvaluator) -> ops.Range:
     ptr = parseIdentifier(node)
     loc = parseLocation(node)
-    return ops.Range(loc, ptr, dim)
+
+    # Find the variable declaration for this range
+    var_decl = find_variable_declaration(node)
+    
+    if var_decl is None:
+        raise ValueError(f"Could not find declaration for range variable '{ptr}' at {loc}")
+
+    # Get the array initializer
+    initializer = None
+    for child in var_decl.get_children():
+        if child.kind == CursorKind.INIT_LIST_EXPR:
+            initializer = child
+            break
+    
+    if initializer is None:
+        raise ValueError(f"Range variable '{ptr}' has no initializer at {loc}")
+
+    # Evaluate each element in the initializer
+    bounds = []
+
+    for i, element in enumerate(initializer.get_children()):
+        value = evaluator.evaluate(element)
+        if value is None:
+            raise ValueError(
+                f"Could not evaluate element in range '{ptr}' to constant at {loc}. "
+                f"Ranges must use compile-time constant expressions."
+            )
+        bounds.append(value)
+    
+    # Validate bounds count (should be 2*dim)
+    # TODO: Should this only be 2 * dim - or dim^2?
+    expected_count = 2 * dim
+    if len(bounds) != expected_count:
+        raise ValueError(
+            f"Range '{ptr}' has {len(bounds)} values, expected {expected_count} for {dim}D"
+        )
+    
+    return ops.Range(loc, ptr, dim, bounds)
+
+
+def find_variable_declaration(node: Cursor) -> Optional[Cursor]:
+    """Find the declaration of the variable referenced by this node"""
+    
+    # If node is a DECL_REF_EXPR, get its definition
+    if node.kind == CursorKind.DECL_REF_EXPR:
+        return node.get_definition()
+    
+    # Otherwise search for it by name
+    var_name = parseIdentifier(node)
+    
+    # Walk up to find the function or file scope
+    current = node.semantic_parent
+    while current:
+        for child in current.get_children():
+            if child.kind == CursorKind.VAR_DECL and child.spelling == var_name:
+                return child
+        current = current.semantic_parent
+    
+    return None
 
 
 def parseArgGbl(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[Location, str]) -> None:
@@ -391,15 +570,19 @@ def parseArgIdx(loop: ops.Loop, args: List[Cursor], loc: Location, macros: Dict[
     loop.addArgIdx(loc)
 
 
-def parseLoop(args: List[Cursor], loc: Location, macros: Dict[Location, str]) -> ops.Loop:
+def parseLoop(translation_unit: TranslationUnit, args: List[Cursor], loc: Location, macros: Dict[Location, str], evaluator: ConstantEvaluator, dat_registry: Dict[str, Tuple]) -> ops.Loop:
     if len(args) < 6:
         raise ParseError("Incorrect number of args passed to ops_par_loop")
+    
+    evaluator = ConstantEvaluator()
+    extract_constants_from_file(translation_unit.cursor, evaluator)
+
 
     kernel = parseIdentifier(args[0])
     name   = parseStringLit(args[1])
     dim    = parseIntLiteral(args[3])
     block  = parseBlock(args[2], dim)
-    range = parseRange(args[4], dim)
+    range = parseRange(args[4], dim, evaluator)
 
     loop = ops.Loop(loc, kernel, block, range, dim)
 
@@ -410,7 +593,7 @@ def parseLoop(args: List[Cursor], loc: Location, macros: Dict[Location, str]) ->
         arg_args = list(node.get_arguments())
 
         if node_name == "ops_arg_dat":
-            parseArgDat(loop, arg_args, arg_loc, macros)
+            parseArgDat(loop, arg_args, arg_loc, macros, evaluator, dat_registry)
 
         elif node_name == "ops_arg_dat_opt":
             parseArgDatOpt(loop, arg_args, arg_loc, macros)
@@ -431,3 +614,142 @@ def parseLoop(args: List[Cursor], loc: Location, macros: Dict[Location, str]) ->
     return loop
 
 
+def extract_constants_from_file(cursor: Cursor, evaluator: ConstantEvaluator):
+    """First pass: find all const int declarations"""
+    
+    for node in cursor.walk_preorder():
+        if node.kind == CursorKind.VAR_DECL:
+            found = False
+            if "imax" in node.spelling or "imax" in node.type.spelling:
+                found = True
+            
+            # Check if it's const
+            if 'const' in node.type.spelling:
+                var_name = node.spelling
+                
+                # Get the initializer expression
+                children = list(node.get_children())
+
+                for child in children:
+                    if child.kind != CursorKind.TYPE_REF:
+                        evaluator.register_constant(var_name, child)
+                        break
+
+
+def find_and_parse_dat_decls(translation_unit: Cursor, evaluator: ConstantEvaluator) -> Dict[str, Tuple]:
+    """Find all ops_decl_dat calls and extract their parameters"""
+    dat_registry = {}
+    
+    for node in translation_unit.walk_preorder():
+        if node.kind == CursorKind.VAR_DECL:
+            for child in node.get_children():
+                if child.kind == CursorKind.UNEXPOSED_EXPR:
+                    # Check if this is an ops_decl_dat call
+                    children = list(child.get_children())
+                    if len(children) >= 10:  # ops_decl_dat has many args
+                        parsed = parseUnexposedFunction(child)
+                        if parsed:
+                            func_name, args = parsed
+                            if func_name == "ops_decl_dat":
+                                dat_name = node.spelling
+                                size, base, d_m, d_p = parse_decl_dat_call_from_args(args, evaluator)
+                                if size or base or d_m or d_p:
+                                    dat_registry[dat_name] = (size, base, d_m, d_p)
+                                    print(f"Registered dat: {dat_name} with size={size}")
+                                break
+    
+    return dat_registry
+
+
+def parse_decl_dat_call_from_args(args: List[Cursor], evaluator: ConstantEvaluator) -> Optional[Tuple]:
+    """
+    Parse ops_decl_dat arguments: (block, dim, size, base, d_m, d_p, data, type, name)
+    Note: args comes from parseUnexposedFunction, which already removed the function name
+    """
+    if len(args) < 7:
+        return None
+    
+    # args[0] = block
+    # args[1] = dim
+    # args[2] = size array
+    # args[3] = base array  
+    # args[4] = d_m array
+    # args[5] = d_p array
+    # args[6+] = data pointer, type, name
+    
+    size = evaluate_array_argument(args[2], evaluator)
+    base = evaluate_array_argument(args[3], evaluator)
+    d_m = evaluate_array_argument(args[4], evaluator)
+    d_p = evaluate_array_argument(args[5], evaluator)
+    
+    if size is None or base is None or d_m is None or d_p is None:
+        print(f"Warning: Could not evaluate arrays: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
+        return None
+    
+    return size, base, d_m, d_p
+
+
+def parse_decl_dat_call(call_node: Cursor, evaluator: ConstantEvaluator) -> Optional[Tuple]:
+    """
+    Parse: ops_decl_dat(block, 1, size, base, d_m, d_p, A, "double", "A")
+    Extract: the size, base, d_m, d_p arrays
+    """
+    # Get call arguments
+    args = list(call_node.get_arguments())
+    if len(args) < 7:
+        print(f"ops_decl_dat has {len(args)} args, expected at least 7")
+        return None
+    
+    # args[0] = block
+    # args[1] = dim (1)
+    # args[2] = size array
+    # args[3] = base array
+    # args[4] = d_m array
+    # args[5] = d_p array
+    # args[6] = data pointer (A)
+    # args[7] = type string
+    # args[8] = name string
+    
+    size = evaluate_array_argument(args[2], evaluator)
+    base = evaluate_array_argument(args[3], evaluator)
+    d_m = evaluate_array_argument(args[4], evaluator)
+    d_p = evaluate_array_argument(args[5], evaluator)
+    
+    if size is None or base is None or d_m is None or d_p is None:
+        print(f"Warning: Could not evaluate arrays: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
+        return None
+    
+    print(f"Parsed dat info: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
+    return size, base, d_m, d_p
+
+
+def evaluate_array_argument(node: Cursor, evaluator: ConstantEvaluator) -> Optional[List[int]]:
+    """
+    Evaluate an array argument (either literal {6, 6} or variable reference 'size')
+    """
+    # Check if it's a variable reference
+    if node.kind == CursorKind.DECL_REF_EXPR or node.kind == CursorKind.UNEXPOSED_EXPR:
+        # Find the variable declaration
+        var_decl = find_variable_declaration(node)
+        if var_decl:
+            # Get its initializer
+            for child in var_decl.get_children():
+                if child.kind == CursorKind.INIT_LIST_EXPR:
+                    return evaluate_array_initializer(child, evaluator)
+    
+    # Or it might be a direct array literal
+    elif node.kind == CursorKind.INIT_LIST_EXPR:
+        return evaluate_array_initializer(node, evaluator)
+    
+    return None
+
+
+def evaluate_array_initializer(init_list: Cursor, evaluator: ConstantEvaluator) -> Optional[List[int]]:
+    """Evaluate {imax, jmax} or {6, 6} to [6, 6]"""
+    values = []
+    for element in init_list.get_children():
+        val = evaluator.evaluate(element)
+        if val is None:
+            return None
+        values.append(val)
+    return values

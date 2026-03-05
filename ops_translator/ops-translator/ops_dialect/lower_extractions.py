@@ -25,6 +25,9 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
+            elif isinstance(op, StencilFieldToTemp):
+                self.lower_field_to_temp(op)
+
 
     def lower_extract_arg(self, op: ExtractArgOp):
         """
@@ -40,7 +43,7 @@ class LowerOpsExtractionsPass(ModulePass):
             ops_arg_type
         ))
         
-        op.results[0].replace_by(arg.results[0])
+        op.results[0].replace_all_uses_with(arg.results[0])
         op.detach()
         op.erase()
 
@@ -53,14 +56,14 @@ class LowerOpsExtractionsPass(ModulePass):
         """
         builder = Builder(InsertPoint.before(op))
         
-        # ops_arg field 0 is now a pointer to ops_dat (not the struct itself)
+        # ops_arg field 0 is a pointer to ops_dat (not the struct itself)
         dat_ptr = builder.insert(ExtractValueOp(
             DenseArrayBase.from_list(i64, [0]),
             op.operands[0],  # The ops_arg struct
-            LLVMPointerType()  # Result type is now a pointer!
+            LLVMPointerType()
         ))
         
-        op.results[0].replace_by(dat_ptr.results[0])
+        op.results[0].replace_all_uses_with(dat_ptr.results[0])
         op.detach()
         op.erase()
 
@@ -91,6 +94,7 @@ class LowerOpsExtractionsPass(ModulePass):
         ))
         
         # Add offset to the pointer (72 bytes = 9 doubles for halo offset)
+        # TODO: Add base offset to pointer dynamically
         offset_const = builder.insert(arith.ConstantOp(IntegerAttr(72, i64)))
         
         adjusted_ptr = builder.insert(GEPOp.from_mixed_indices(
@@ -100,7 +104,7 @@ class LowerOpsExtractionsPass(ModulePass):
             result_type=LLVMPointerType(),
         ))
         
-        op.results[0].replace_by(adjusted_ptr.results[0])
+        op.results[0].replace_all_uses_with(adjusted_ptr.results[0])
         op.detach()
         op.erase()
 
@@ -116,7 +120,7 @@ class LowerOpsExtractionsPass(ModulePass):
 
 
         ref = memref.ReinterpretCastOp(
-            source=op.operands[0],  # !llvm.ptr
+            source=op.operands[0],
             result_type=ref_type,
             static_offsets=[0],
             static_sizes=[8, 8],
@@ -130,7 +134,7 @@ class LowerOpsExtractionsPass(ModulePass):
 
         builder.insert(ref)
  
-        op.results[0].replace_by(ref.results[0])
+        op.results[0].replace_all_uses_with(ref.results[0])
 
         op.detach()
         op.erase()
@@ -140,7 +144,6 @@ class LowerOpsExtractionsPass(ModulePass):
     
         builder = Builder(InsertPoint.before(op))
         
-        # Use stencil.cast instead of external_load
         cast = stencil.CastOp(
             operands=[op.operands[0]],
             result_types=[op.result_types[0]]
@@ -148,7 +151,22 @@ class LowerOpsExtractionsPass(ModulePass):
         
         builder.insert(cast)
         
-        op.results[0].replace_by(cast.results[0])
+        op.results[0].replace_all_uses_with(cast.results[0])
         op.detach()
         op.erase()
 
+
+    def lower_field_to_temp(self, op: StencilFieldToTemp):
+
+        builder = Builder(InsertPoint.before(op))
+        
+        load = stencil.LoadOp(
+            operands=[op.operands[0]],
+            result_types=[op.result_types[0]]
+        )
+        
+        builder.insert(load)
+        
+        op.results[0].replace_all_uses_with(load.results[0])
+        op.detach()
+        op.erase()

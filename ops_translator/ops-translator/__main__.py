@@ -21,6 +21,7 @@ from pipeline import Pipeline
 from util import getVersion, safeFind
 from util import create_cpp_main, replace_fortran_program_with_subroutine
 from typing import Dict
+from kernel_config import KernelConfig, generateKernelConfig
 
 
 
@@ -182,7 +183,7 @@ def main(argv=None) -> None:
             print(f"Translation strategy: {strategy}")
 
         print("Code-gen : Generating strategy specific IR, strategy - " + strategy.name)
-        codegen(args, pipeline, app, loop_to_function_name, args.force_soa)
+        codegen(args, pipeline, app, lang, loop_to_function_name, args.force_soa)
 
         if args.verbose:
             print(f"Translation completed: {strategy}")
@@ -231,7 +232,7 @@ def validate(args: Namespace, lang: Lang, app: Application) -> None:
             print("Dumped store: ", store_path.resolve(), end="\n\n")
 
 
-def codegen(args: Namespace, pipeline: Pipeline, app: Application, loop_to_function_name: Dict[str, str], force_soa: bool = False) -> None:
+def codegen(args: Namespace, pipeline: Pipeline, app: Application, lang: Lang, loop_to_function_name: Dict[str, str], force_soa: bool = False) -> None:
     # Collect the paths of the generated files
     include_dirs = set([Path(dir) for [dir] in args.I])
     defines = [define for [define] in args.D]
@@ -297,11 +298,15 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, loop_to_funct
 
         function_name = loop_to_function_name[loop]
 
+        print(function_name)
+
+        config = generateKernelConfig(function_name, loop)
+
         # Generate IR for the kernel
-        new_source = pipeline.runPipeline(loop=loop, program=program, app=app, function_name=function_name, force_soa=force_soa)
+        new_source = pipeline.runPipeline(loop=loop, program=program, app=app, kernel_config=config, force_soa=force_soa, lang=lang)
 
         # Form output files path
-        path = Path(args.out, pipeline.strategy.name, f"{loop.kernel}_kernel.ll")
+        path = Path(args.out, pipeline.strategy.name, f"{function_name}.ll")
         
         # Create directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)

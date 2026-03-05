@@ -4,33 +4,39 @@ from xdsl.ir import Operation, SSAValue
 from xdsl.builder import Builder, InsertPoint
 
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp
-from xdsl.dialects.builtin import IntegerType, f32, f64
-from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, StoreOp
+from xdsl.dialects.builtin import IntegerType, f32, f64, Region
+from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, StoreOp, AccessOp
 
 from .ops_dialect import *
 from xdsl.dialects.llvm import LLVMFunctionType, LLVMPointerType, LLVMVoidType
 from xdsl.dialects.func import FuncOp as FuncFuncOp
+
+from kernel_config import KernelConfig
+from kernel_parser import KernelParser
 
 from .ops_types import *
 
 class LowerComputePass(ModulePass):
     """
     Lower ops.compute to Stencil operations
-    
+
     Input:
-        ops.compute(%data_field, %data_ref) {
-            <kernel computation body for stencil accesses>
-        }
+        ops.compute(%data_field, %data_ref, ...)
     """
-    
+
     name = "lower-ops-compute"
+
+    def __init__(self, config: KernelConfig):
+        self.config = config
+        self.kernel_parser = KernelParser()
+
     
     def apply(self, ctx, module):
 
         for func in module.walk():
             if not isinstance(func, LLVMFuncOp):
                 continue
-            
+
             for op in list(func.walk()):
                 if isinstance(op, ComputeOp):
                     self.lower_compute(op)
@@ -40,29 +46,37 @@ class LowerComputePass(ModulePass):
         
         builder = Builder(InsertPoint.before(compute_op))
 
-        bottom_range_bounds = StencilBoundsAttr([(0, 8), (0, 8)])
+        range_bounds = StencilBoundsAttr(self.config.iteration_bounds)
         
-        temp_type = TempType(bottom_range_bounds, f64)
+        temp_type = TempType(self.config.grid_size, f64)
 
-        load_op = LoadOp.build(
-            operands=[compute_op.operands[0]],
-            result_types=[temp_type]
+        kernel_params = self.config.kernel_info.param_order
+
+        read_field_operands = []
+    
+        for i in range(len(self.config.kernel_info.read_fields)):
+            # Get the corresponding operand from compute_op
+            temp_operand_idx = i * 2
+            if temp_operand_idx < len(compute_op.operands):
+                read_field_operands.append(compute_op.operands[temp_operand_idx])
+            else:
+                raise ValueError(f"Missing operand for read temp at position {i}")
+
+        body_block = Block(arg_types=[
+            temp_type  # One for each read field
+            for _ in self.config.kernel_info.read_fields
+        ])
+        
+        stencil_ops = self.kernel_parser.kernel_info_to_stencil_ops(
+            kernel_info=self.config.kernel_info,
+            temp_args= body_block.args
         )
-
-        load_op.results[0].name_hint = "temp"
-        builder.insert(load_op)
-
-        # dat = self.extract_arg_dat(builder, ops_arg)
-        # access = self.extract_arg_access(builder, ops_arg)
-
-        # args_info.append(dat)
-
-        # self.extract_arg_dat_data(builder, dat)
-        # self.extract_arg_dat_size(builder, dat)
-
         
-        # detach compute_op body to use in stencil.apply
-        body = compute_op.detach_region(compute_op.body)
+        # Add all ops to the body block
+        for op in stencil_ops:
+            body_block.add_op(op)
+        
+        body = Region([body_block])
 
         # Replace ops.yield with stencil.return in the body
         block = body.blocks[0]
@@ -71,23 +85,25 @@ class LowerComputePass(ModulePass):
                 return_op = ReturnOp.get(list(op.operands))
                 block.insert_op_before(return_op, op)
                 block.erase_op(op)
+
+        write_field_param_name = self.config.kernel_info.write_fields[0]
+        write_field_param_idx = self.config.kernel_info.param_order.index(write_field_param_name)
+        write_field_operand_idx = write_field_param_idx * 2 + 1
+        write_field_operand = compute_op.operands[write_field_operand_idx]
             
-            # Should also add a condition here for ops.access to be lowered to stencil.access
-
-
         apply_op = ApplyOp.get(
-            [],# [load_op.results[0]],
+            read_field_operands,
             body,
             [temp_type],
-            bottom_range_bounds
+            range_bounds
         )
-
+        
         apply_op.results[0].name_hint = "apply"
         builder.insert(apply_op)
 
-        external_store = StoreOp.build(operands=[apply_op.results[0], compute_op.operands[0]])
-        builder.insert(external_store)
+        # store temp to field
+        store = StoreOp.build(operands=[apply_op.results[0], write_field_operand])
+        builder.insert(store)
 
         compute_op.detach()
         compute_op.erase()
-    

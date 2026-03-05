@@ -89,6 +89,6 @@ class LowerPtrToMemrefPass(ModulePass):
 
         
         # Replace uses
-        op.result.replace_by(memref_val.results[0])
+        op.result.replace_all_uses_with(memref_val.results[0])
         op.detach()
         op.erase()

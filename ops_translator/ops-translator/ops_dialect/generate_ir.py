@@ -27,19 +27,19 @@ from xdsl.dialects.builtin import ModuleOp, FunctionType, IndexType, IntegerType
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Block, Region
 from xdsl.builder import Builder, InsertPoint
+from kernel_config import KernelConfig
 
-def create_function_with_wrapper(function_name: str) -> ModuleOp:
+def create_function_with_wrapper(config: KernelConfig) -> ModuleOp:
     module = ModuleOp([])
 
     builder = Builder(InsertPoint.at_start(module.body.block))  
 
     param_types = [
-        LLVMPointerType(),
-        ops_block_type,
-        IntegerType(32),
-        LLVMPointerType(),
-        LLVMPointerType()
-    ]
+        LLVMPointerType(),  # name
+        ops_block_type,     # block
+        IntegerType(32),    # dim
+        LLVMPointerType(),  # range
+    ] + [LLVMPointerType() for _ in config.dats]  # ops_args
 
     entry_block = Block(arg_types=param_types)
 
@@ -53,7 +53,7 @@ def create_function_with_wrapper(function_name: str) -> ModuleOp:
         entry_block.args[i].name_hint = 'ops_arg' + str(i - 3)
 
     fn = LLVMFuncOp(
-        sym_name=function_name + "_impl",
+        sym_name=config.name + "_impl",
         function_type=LLVMFunctionType(
             inputs=param_types,
             output=LLVMVoidType(),
@@ -67,7 +67,7 @@ def create_function_with_wrapper(function_name: str) -> ModuleOp:
     builder1 = Builder(InsertPoint.at_end(entry_block))
     builder1.insert(llvm.ReturnOp())
 
-    wrapper_fn = generate_c_wrapper(function_name, param_types, fn)
+    wrapper_fn = generate_c_wrapper(config.name, param_types, fn)
 
     builder.insert(wrapper_fn)
 
@@ -105,7 +105,7 @@ def generate_c_wrapper(wrapper_name: str, param_types: list, main_func: LLVMFunc
     # - param 1: ops_block_type (pointer) - pass through
     # - param 2: i32 - LOAD
     # - param 3: LLVMPointerType (int*) - pass through
-    # - param 4: ops_arg_type (struct) - LOAD
+    # - param 4+: ops_arg_type (struct) - LOAD
     
     loaded_args = []
     for i, param_type in enumerate(param_types):
@@ -123,8 +123,7 @@ def generate_c_wrapper(wrapper_name: str, param_types: list, main_func: LLVMFunc
     # Call the main function
     builder.insert(llvm.CallOp(
         main_func.sym_name.data,
-        *loaded_args,
-        # return_type=LLVMVoidType(),
+        *loaded_args
     ))
     
     builder.insert(llvm.ReturnOp())
@@ -137,21 +136,12 @@ def create_par_loop(
     block: SSAValue,
     dim: SSAValue,
     range_ptr: SSAValue,
-    args: list[SSAValue],
-    kernel_instructions: list # parsed kernel instructions
+    *ops_args: list[SSAValue]
 ):
     """Create ops.par_loop in function body"""
-
-    body_block = Block(arg_types=[])
-    
-    # Manually add operations to the block
-    body_block.add_ops(kernel_instructions)
-    
-    body_region = Region([body_block])
     
     par_loop = ParLoopOp.create(
-        operands=[kernel_name_ptr, block, dim, range_ptr, args],
-        regions=[body_region]
+        operands=[kernel_name_ptr, block, dim, range_ptr] + list(ops_args)
     )
     
     return par_loop
@@ -163,13 +153,7 @@ def add_ops_operations(module: ModuleOp):
 
     builder = Builder(InsertPoint.at_start(fn_body))
 
-    # create list from parsed kernel here
-    result1 = ConstantOp(FloatAttr(0.0, f64))
-
-    yield_op = YieldOp.create(operands=[result1.results[0]])
-    kernel_ops = [result1, yield_op]
-
-    op = create_par_loop(fn_body.args[0], fn_body.args[1], fn_body.args[2], fn_body.args[3], fn_body.args[4], kernel_ops)
+    op = create_par_loop(*fn_body.args[:4], *fn_body.args[4:])
 
     builder.insert(op)
 

@@ -68,9 +68,9 @@ class LowerParLoopPass(ModulePass):
 
             data_field = self.create_ref_to_field(builder, data_ref)
 
-            data_temp = self.create_field_to_temp(builder, data_field)
+            # data_temp = self.create_field_to_temp(builder, data_field)
 
-            args_info.append(data_temp)
+            # args_info.append(data_temp)
             args_info.append(data_field)
 
         builder.insert(ComputeOp.create(

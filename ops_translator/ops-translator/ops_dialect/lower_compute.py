@@ -54,13 +54,12 @@ class LowerComputePass(ModulePass):
 
         read_field_operands = []
     
-        for i in range(len(self.config.kernel_info.read_fields)):
+        for temp_operand_idx in range(len(self.config.kernel_info.read_fields)):
             # Get the corresponding operand from compute_op
-            temp_operand_idx = i * 2
             if temp_operand_idx < len(compute_op.operands):
                 read_field_operands.append(compute_op.operands[temp_operand_idx])
             else:
-                raise ValueError(f"Missing operand for read temp at position {i}")
+                raise ValueError(f"Missing operand for read field at position {temp_operand_idx}")
 
         body_block = Block(arg_types=[
             temp_type  # One for each read field
@@ -75,7 +74,6 @@ class LowerComputePass(ModulePass):
         # Add all ops to the body block
         for op in stencil_ops:
             body_block.add_op(op)
-        
         body = Region([body_block])
 
         # Replace ops.yield with stencil.return in the body
@@ -86,24 +84,26 @@ class LowerComputePass(ModulePass):
                 block.insert_op_before(return_op, op)
                 block.erase_op(op)
 
-        write_field_param_name = self.config.kernel_info.write_fields[0]
-        write_field_param_idx = self.config.kernel_info.param_order.index(write_field_param_name)
-        write_field_operand_idx = write_field_param_idx * 2 + 1
-        write_field_operand = compute_op.operands[write_field_operand_idx]
-            
-        apply_op = ApplyOp.get(
-            read_field_operands,
-            body,
-            [temp_type],
-            range_bounds
-        )
-        
-        apply_op.results[0].name_hint = "apply"
-        builder.insert(apply_op)
 
-        # store temp to field
-        store = StoreOp.build(operands=[apply_op.results[0], write_field_operand])
-        builder.insert(store)
+        write_field_operands = []
+        for write_field_param_name in self.config.kernel_info.write_fields:
+            write_field_operand_idx = self.config.kernel_info.param_order.index(write_field_param_name)
+
+            if write_field_operand_idx < len(compute_op.operands):
+                write_field_operands.append(compute_op.operands[write_field_operand_idx])
+            else:
+                raise ValueError(f"Missing operand for write field {write_field_param_name}")
+
+        
+        # Build apply op using buffer semantics
+        apply_op = ApplyOp.build(
+            operands=[read_field_operands, write_field_operands], # actual FIELDS
+            regions=[body],
+            result_types=[[]], # no result, as we don't return a temp
+            properties={"bounds": range_bounds}
+        )
+      
+        builder.insert(apply_op)
 
         compute_op.detach()
         compute_op.erase()

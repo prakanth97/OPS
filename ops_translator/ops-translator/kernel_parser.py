@@ -24,7 +24,7 @@ class KernelInfo:
     param_order: List[str] # To maintain global parameter order
     read_fields: List[str]   # const ACC parameters
     write_fields: List[str]  # non-const ACC parameters
-    write_target: StencilAccess
+    write_targets: List[Tuple[StencilAccess, Cursor]]
     accesses: List[StencilAccess]
     computation_ast: Cursor
 
@@ -97,17 +97,34 @@ class KernelParser:
 
         
         # 2. Find the assignment statement in the function body
-        assignment_node = self.find_assignment(func_node)
+        assignment_nodes = self.find_all_assignments(func_node)
         
-        if not assignment_node:
+        if not assignment_nodes:
             raise ParseError(f"No assignment found in kernel {func_node.spelling}")
         
         # 3. Extract LHS (write target)
-        lhs, rhs = self.split_assignment(assignment_node)
-        write_target = self.parse_accessor(lhs, loop.ndim)
+        write_targets = []
+        all_accesses = []
+
+        for assignment_node in assignment_nodes:
+
+            lhs, rhs = self.split_assignment(assignment_node)
+            write_target = self.parse_accessor(lhs, loop.ndim)
+            write_targets.append((write_target, rhs))
         
-        # 4. Extract all RHS accesses
-        accesses = self.extract_accesses_from_expr(rhs, loop.ndim)
+            # 4. Extract all RHS accesses
+            accesses = self.extract_accesses_from_expr(rhs, loop.ndim)
+            all_accesses.extend(accesses)
+
+        # Remove duplicate accesses
+        unique_accesses = []
+        seen = set()
+
+        for acc in all_accesses:
+            key = (acc.field_name, acc.offsets)
+            if key not in seen:
+                seen.add(key)
+                unique_accesses.append(acc)
         
         return KernelInfo(
             name=func_node.spelling,
@@ -115,23 +132,25 @@ class KernelParser:
             param_order=param_order,
             read_fields=read_fields,
             write_fields=write_fields,
-            write_target=write_target,
+            write_targets=write_targets,
             accesses=accesses,
             computation_ast=rhs
         )
     
-    
-    def find_assignment(self, func_node: Cursor) -> Optional[Cursor]:
-        """Find the assignment statement (=) in the function body"""
+
+    def find_all_assignments(self, func_node: Cursor) -> List[Cursor]:
+        """Find all assignment statement (=) in the function body"""
+        assignments = []
+
         for node in func_node.walk_preorder():
             if node.kind == CursorKind.BINARY_OPERATOR:
                 # Check if it's an assignment
                 tokens = list(node.get_tokens())
                 for token in tokens:
                     if token.spelling == '=':
-                        return node
-        return None
-    
+                        assignments.append(node)
+                        break
+        return assignments
     
     def split_assignment(self, assignment_node: Cursor) -> Tuple[Cursor, Cursor]:
         """Split assignment into LHS and RHS"""
@@ -231,11 +250,10 @@ class KernelParser:
         
         return translation_unit
     
-
     def kernel_info_to_stencil_ops(
         self,
         kernel_info: KernelInfo,
-        temp_args: List[SSAValue]  # Block arguments in order of read_fields
+        temp_args: List[SSAValue]
     ) -> List[IRDLOperation]:
         """Convert KernelInfo to stencil IR operations"""
         
@@ -248,29 +266,30 @@ class KernelParser:
             for i, field_name in enumerate(kernel_info.read_fields)
         }
         
-        # 1. Create stencil.access for each unique access
+        # 1. Create stencil.access ONCE for each unique access (shared by all writes)
         for access in kernel_info.accesses:
             key = (access.field_name, access.offsets)
             if key not in access_values:
-                print(access.field_name)
                 temp_arg = field_to_temp[access.field_name]
                 access_op = self.create_stencil_access(access, temp_arg)
                 ops.append(access_op)
                 access_values[key] = access_op.results[0]
         
-        # 2. Build computation
-        result = self.build_computation_ops(
-            kernel_info.computation_ast,
-            access_values,
-            ops
-        )
+        # 2. Build computation for EACH write target
+        results = []
+        for write_target, rhs_ast in kernel_info.write_targets:
+            result = self.build_computation_ops(
+                rhs_ast,
+                access_values,
+                ops
+            )
+            results.append(result)
         
-        # 3. Return the result
-        return_op = YieldOp.create(operands=[result])
+        # 3. Return ALL results (one per write field)
+        return_op = YieldOp.create(operands=results)  # Multiple operands!
         ops.append(return_op)
         
         return ops
-    
 
     def create_stencil_access(self, access: StencilAccess, temp_ssa_value: SSAValue) -> AccessOp:
         """Create stencil.access operation for A(i, j)"""

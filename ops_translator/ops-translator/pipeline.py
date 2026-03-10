@@ -7,13 +7,13 @@ from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
 from ops_dialect.lower_extractions import LowerOpsExtractionsPass
 from ops_dialect.lower_ptr_to_memref import LowerPtrToMemrefPass
+from ops_dialect.replacebuffer import ReplaceStencilBufferWithOriginal
+
 from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
 from xdsl.transforms.stencil_bufferize import StencilBufferize
 from xdsl.transforms.canonicalize import CanonicalizePass
 from kernel_config import KernelConfig, attachKernelInfo
 from language import Lang
-
-from ops_dialect.lower_remove_loads import RemoveUnusedStencilLoads
 
 from xdsl.printer import Printer
 from io import StringIO
@@ -81,6 +81,7 @@ class Pipeline(Findable):
             LowerOpsExtractionsPass(),
             LowerPtrToMemrefPass(),
             StencilBufferize(),
+            ReplaceStencilBufferWithOriginal(),
             ConvertStencilToLLMLIRPass(),
             CanonicalizePass(),
         ])
@@ -90,8 +91,9 @@ class Pipeline(Findable):
         print(ir_module)
 
 
-        with open("demofile.txt", "w") as f:
+        with open("demofile.mlir", "w") as f:
             f.write(str(ir_module))
+
 
         # return None
         # return ir_module
@@ -133,10 +135,17 @@ class Pipeline(Findable):
         pm.run(op)
 
         print(mlir_module)
+        print("CHECK POINT --------------")
+
+        # After your lowering passes, before mlir-translate
 
 
         # equivalent to running mlir-translate
+        with open("output.mlir", "w") as f:
+            f.write(str(mlir_module))
+        print("Wrote MLIR to output.mlir")
         res = translate_module_to_llvmir(mlir_module.operation)
+
 
         # Replace nuw to make compilation valid
         # TODO: work out reason for this - I think compiler / mlir version mismatches

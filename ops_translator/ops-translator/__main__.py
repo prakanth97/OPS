@@ -314,7 +314,7 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, lang: Lang, l
         # Write the gernerated source file
         with open(path, "w") as file:
             file.write(f"; Auto-generated at {datetime.now()} by ops-translator\n\n")
-            file.write(new_source)
+            file.write(str(new_source))
 
             if args.verbose:
                 print(f"Generated loop host {i} of {len(app.uniqueLoops())}: {path}")

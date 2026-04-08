@@ -300,7 +300,7 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, lang: Lang, l
 
         print(function_name)
 
-        config = generateKernelConfig(function_name, loop)
+        config = generateKernelConfig(function_name, loop, program)
 
         # Generate IR for the kernel
         new_source = pipeline.runPipeline(loop=loop, program=program, app=app, kernel_config=config, force_soa=force_soa, lang=lang)

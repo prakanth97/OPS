@@ -25,8 +25,6 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
-            elif isinstance(op, StencilFieldToTemp):
-                self.lower_field_to_temp(op)
 
 
     def lower_extract_arg(self, op: ExtractArgOp):
@@ -95,16 +93,16 @@ class LowerOpsExtractionsPass(ModulePass):
         
         # Add offset to the pointer (72 bytes = 9 doubles for halo offset)
         # TODO: Add base offset to pointer dynamically
-        offset_const = builder.insert(arith.ConstantOp(IntegerAttr(72, i64)))
+        # offset_const = builder.insert(arith.ConstantOp(IntegerAttr(72, i64)))
         
-        adjusted_ptr = builder.insert(GEPOp.from_mixed_indices(
-            data_ptr.results[0],
-            indices=[offset_const.results[0]],  # dynamic offset
-            pointee_type=IntegerType(8),  # i8 for byte-level pointer offset arithmetic
-            result_type=LLVMPointerType(),
-        ))
+        # adjusted_ptr = builder.insert(GEPOp.from_mixed_indices(
+        #     data_ptr.results[0],
+        #     indices=[offset_const.results[0]],  # dynamic offset
+        #     pointee_type=IntegerType(8),  # i8 for byte-level pointer offset arithmetic
+        #     result_type=LLVMPointerType(),
+        # ))
         
-        op.results[0].replace_all_uses_with(adjusted_ptr.results[0])
+        op.results[0].replace_all_uses_with(data_ptr.results[0])
         op.detach()
         op.erase()
 
@@ -145,8 +143,9 @@ class LowerOpsExtractionsPass(ModulePass):
         builder = Builder(InsertPoint.before(op))
         
         cast = stencil.CastOp(
-            operands=[op.operands[0]],
-            result_types=[op.result_types[0]]
+            field=[op.operands[0]],
+            bounds= op.result_types[0].bounds,
+            res_type=[op.result_types[0]]
         )
         
         builder.insert(cast)
@@ -155,18 +154,3 @@ class LowerOpsExtractionsPass(ModulePass):
         op.detach()
         op.erase()
 
-
-    def lower_field_to_temp(self, op: StencilFieldToTemp):
-
-        builder = Builder(InsertPoint.before(op))
-        
-        load = stencil.LoadOp(
-            operands=[op.operands[0]],
-            result_types=[op.result_types[0]]
-        )
-        
-        builder.insert(load)
-        
-        op.results[0].replace_all_uses_with(load.results[0])
-        op.detach()
-        op.erase()

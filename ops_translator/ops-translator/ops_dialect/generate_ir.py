@@ -19,6 +19,8 @@ from xdsl.dialects.builtin import (
     ModuleOp,
     IntegerType, 
 )
+
+from typing import Optional
 from .ops_dialect import *
 from .ops_types import *
 
@@ -39,7 +41,7 @@ def create_function_with_wrapper(config: KernelConfig) -> ModuleOp:
         ops_block_type,     # block
         IntegerType(32),    # dim
         LLVMPointerType(),  # range
-    ] + [LLVMPointerType() for _ in config.dats]  # ops_args
+    ] + [LLVMPointerType() for _ in config.arg_order]  # ops_args
 
     entry_block = Block(arg_types=param_types)
 
@@ -136,24 +138,62 @@ def create_par_loop(
     block: SSAValue,
     dim: SSAValue,
     range_ptr: SSAValue,
-    *ops_args: list[SSAValue]
+    dat_ptrs: List[SSAValue],
+    idx_ptr: Optional[SSAValue],
+    reduction_ptrs: List[SSAValue]
 ):
     """Create ops.par_loop in function body"""
     
-    par_loop = ParLoopOp.create(
-        operands=[kernel_name_ptr, block, dim, range_ptr] + list(ops_args)
+    par_loop = ParLoopOp.build(
+        operands=[
+            [kernel_name_ptr], 
+            [block], 
+            [dim], 
+            [range_ptr],
+            dat_ptrs,
+            [idx_ptr] if idx_ptr else [],
+            reduction_ptrs
+        ],
+        regions=[Region([Block()])]
     )
     
     return par_loop
 
-def add_ops_operations(module: ModuleOp):
+def add_ops_operations(module: ModuleOp, kernel_config: KernelConfig):
 
     fn = module.body.ops.first
     fn_body = fn.body.blocks.first
 
     builder = Builder(InsertPoint.at_start(fn_body))
 
-    op = create_par_loop(*fn_body.args[:4], *fn_body.args[4:])
+    kernel_name = fn_body.args[0]
+    block = fn_body.args[1]
+    dim = fn_body.args[2]
+    range_ptr = fn_body.args[3]
+
+    dat_args = []
+    idx_arg = None
+    reduction_args = []
+
+    for arg_info in kernel_config.arg_order:
+        fn_arg = fn_body.args[4 + arg_info.index]
+
+        if arg_info.arg_type == "dat":
+            dat_args.append(fn_arg)
+        elif arg_info.arg_type == "idx":
+            idx_arg = fn_arg
+        elif arg_info.arg_type == "reduce":
+            reduction_args.append(fn_arg)
+
+    op = create_par_loop(
+        kernel_name,
+        block,
+        dim,
+        range_ptr,
+        dat_args,
+        idx_arg,
+        reduction_args
+    )
 
     builder.insert(op)
 

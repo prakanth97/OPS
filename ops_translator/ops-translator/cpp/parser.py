@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 
 from clang.cindex import Cursor, CursorKind, TranslationUnit, TypeKind, conf
 
@@ -753,3 +753,37 @@ def evaluate_array_initializer(init_list: Cursor, evaluator: ConstantEvaluator) 
             return None
         values.append(val)
     return values
+
+def parseConstantDeclarations(cursor: Cursor, program: Program) -> Dict[str, Any]:
+    """
+    Parse global constant declarations and extract their values.
+    Returns a dict mapping variable names to their compile-time values.
+    """
+    const_values = {}
+    
+    for node in cursor.walk_preorder():
+        # Look for variable declarations
+        if node.kind == CursorKind.VAR_DECL:
+            var_name = node.spelling
+            
+            # Check if it has a constant initializer
+            children = list(node.get_children())
+            if children:
+                init_expr = children[0]
+                
+                # Try to evaluate the initializer
+                try:
+                    if init_expr.kind == CursorKind.FLOATING_LITERAL:
+                        tokens = list(init_expr.get_tokens())
+                        if tokens:
+                            value_str = tokens[0].spelling.rstrip('fF')
+                            const_values[var_name] = float(value_str)
+                    
+                    elif init_expr.kind == CursorKind.INTEGER_LITERAL:
+                        tokens = list(init_expr.get_tokens())
+                        if tokens:
+                            const_values[var_name] = int(tokens[0].spelling)
+                except:
+                    pass  # Skip if we can't evaluate
+    
+    return const_values

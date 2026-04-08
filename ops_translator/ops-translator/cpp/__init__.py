@@ -101,6 +101,9 @@ class Cpp(Lang):
         cpp.parser.parseLoops(ast, program)
         cpp.parser.parseMeta(ast_pp.cursor, program)
 
+        program.const_values = cpp.parser.parseConstantDeclarations(ast_pp.cursor, program)
+
+
         return program
 
     def translateProgram(self, program: Program, include_dirs: Set[Path], defines: List[str], app_consts: List[ops.Const], loop_to_function_name: Dict[str,str], force_soa: bool = False, offload_pragma_flag_dict = {}) -> str:

@@ -90,6 +90,7 @@ class Program:
     ndim: Optional[int] = None
     soa_val: Optional[bool] = False
     init_flag: Optional[bool] = False
+    const_values: dict[str, Any] = None
 
     def findEntities(self, name: str, scope: List[str] = []) -> List[Entity]:
         def in_scope(entity: Entity):

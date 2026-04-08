@@ -1,5 +1,5 @@
 from xdsl.traits import IsTerminator
-from xdsl.ir import SSAValue, TypeAttribute, ParametrizedAttribute, Attribute
+from xdsl.ir import SSAValue, TypeAttribute, ParametrizedAttribute, Attribute, Operation
 from xdsl.irdl import (
     IRDLOperation,
     param_def,
@@ -9,25 +9,18 @@ from xdsl.irdl import (
     var_operand_def,
     result_def,
     traits_def,
-    region_def
+    region_def,
+    var_result_def,
+    attr_def,
+    opt_operand_def,
+    AttrSizedOperandSegments
 )
 
 from xdsl.dialects.llvm import LLVMArrayType, LLVMPointerType, i32
-from xdsl.dialects.builtin import StringAttr, IntegerType
- 
+from xdsl.dialects.builtin import StringAttr, IntegerType, IntegerAttr
+
+from typing import List
 from .ops_types import *
-
-
-@irdl_op_definition
-class ExtractArgTypeOp(IRDLOperation):
-    name = "ops.extract_arg_type"
-
-    ops_arg = operand_def(Attribute)
-
-    result = result_def(IntegerType(32))
-
-    def __init__(self, arg: SSAValue):
-        super().__init__(operands=[arg], result_types=[IntegerType(32)])
 
 
 @irdl_op_definition
@@ -66,49 +59,6 @@ class ExtractArgDatDataOp(IRDLOperation):
 
 
 @irdl_op_definition
-class ExtractArgDatSizeOp(IRDLOperation):
-    name = "ops.extract_arg_dat_size"
-    
-    ops_dat = operand_def(Attribute)
-
-    result = result_def()
-
-    def __init__(self, arg: SSAValue):
-        super().__init__(operands=[arg], result_types=[LLVMArrayType.from_size_and_type(
-            OPS_MAX_DIM, i32)
-        ])
-
-
-@irdl_op_definition
-class ExtractArgAccessOp(IRDLOperation):
-    name = "ops.extract_arg_access"
-    
-    ops_arg = operand_def(Attribute)
-
-    result = result_def()
-
-    def __init__(self, arg: SSAValue):
-        super().__init__(operands=[arg], result_types=[i32])
-
-
-@irdl_attr_definition
-class OpsBlockType(ParametrizedAttribute, TypeAttribute):
-    name = "ops.block"
-
-
-@irdl_attr_definition
-class OpsArgType(ParametrizedAttribute, TypeAttribute):
-    name = "ops.arg"
-
-    access_mode: StringAttr = param_def(StringAttr)
-
-    def __init__(self, access_mode: str | StringAttr = "read"):
-        if isinstance(access_mode, str):
-            access_mode = StringAttr(access_mode)
-        super().__init__(access_mode)
-
-
-@irdl_op_definition
 class ParLoopOp(IRDLOperation):
 
     name = "ops.par_loop"
@@ -116,44 +66,27 @@ class ParLoopOp(IRDLOperation):
     block = operand_def()
     dim = operand_def()
     range_ptr = operand_def()
-    args = var_operand_def()
+
+    dats = var_operand_def()
+    idx = opt_operand_def()
+    reductions = var_operand_def()
     
     # This is where kernel computation goes
     body = region_def()
 
+    irdl_options = [AttrSizedOperandSegments()]
+
+
 
 @irdl_op_definition
-class YieldOp(IRDLOperation):
+class ReturnOp(IRDLOperation):
 
-    name = "ops.yield"
+    name = "ops.return"
     
-    # Variable number of operands (can yield multiple values)
+    # Variable number of operands (can return multiple values)
     arguments = var_operand_def()
 
     traits = traits_def(IsTerminator())
-
-
-irdl_op_definition
-class ExtractBlockOp(IRDLOperation):
-
-    name = "ops.extract_block"
-    block_struct = operand_def()
-    result = result_def()
-
-
-@irdl_op_definition
-class ExtractDimOp(IRDLOperation):
-    name = "ops.extract_dim"
-    dim_value = operand_def()
-    result = result_def()
-
-
-@irdl_op_definition
-class ExtractRangeOp(IRDLOperation):
-    name = "ops.extract_range"
-    range_ptr = operand_def()
-    dim = operand_def()
-    result = result_def()
 
 
 @irdl_op_definition
@@ -169,11 +102,6 @@ class MemrefToStencilField(IRDLOperation):
     ref = operand_def()
     result = result_def()
 
-@irdl_op_definition
-class StencilFieldToTemp(IRDLOperation):
-    name = "ops.field_to_temp"
-    ref = operand_def()
-    result = result_def()
 
 @irdl_op_definition
 class ComputeOp(IRDLOperation):
@@ -184,3 +112,51 @@ class ComputeOp(IRDLOperation):
     
     # Kernel computation body goes here
     body = region_def()
+
+
+@irdl_op_definition
+class GetIndexOp(IRDLOperation):
+    """Get the current iteration indices for all dimensions"""
+
+    name = "ops.get_index"
+
+    # indices = result_def()
+    indices = var_result_def(i32)
+
+
+    def __init__(self, dim_value: int):
+        Operation.__init__(
+            self,
+            operands=[],
+            result_types=[IntegerType(32) for _ in range(dim_value)],
+            attributes={"dim": IntegerAttr(dim_value, IntegerType(32))},
+            successors=[],
+            regions=[]
+        )
+
+    @staticmethod
+    def get(dim: int):
+        return GetIndexOp(dim)
+
+@irdl_op_definition
+class ExtractIndexOp(IRDLOperation):
+    """Extract a specific dimension from the index"""
+
+    name = "ops.extract_index"
+
+    indices = var_operand_def(i32)
+    result = result_def(i32)
+    
+    dimension = attr_def(IntegerAttr)
+
+
+    def __init__(self, indices_vals: List[SSAValue], dimension_val: int):
+        super().__init__(
+            operands=indices_vals,
+            result_types=[IntegerType(32)],
+            attributes={"dimension": IntegerAttr(dimension_val, IntegerType(32))}
+        )
+
+    @staticmethod
+    def get(indices: List[SSAValue], dimension: int):
+        return ExtractIndexOp(indices, dimension)

@@ -18,6 +18,7 @@ class CPUSequential(Pipeline):
             "canonicalize",
             "cse",
             "lower-affine",
+            "convert-math-to-llvm",
             "convert-arith-to-llvm",
             "convert-func-to-llvm",
             "expand-strided-metadata",
@@ -39,11 +40,14 @@ class OpenMP(Pipeline):
             "convert-scf-to-openmp",
             "canonicalize",
             "cse",
+
             "convert-openmp-to-llvm",
             "canonicalize",
             "lower-affine",
+            "convert-math-to-llvm",
             "expand-strided-metadata",
             "finalize-memref-to-llvm",
+
             "canonicalize", # extra one
             "convert-scf-to-cf",
             "convert-cf-to-llvm",
@@ -84,6 +88,7 @@ class GPUCUDA(Pipeline):
             f"nvvm-attach-target={nvvm_target}",
             "convert-scf-to-cf",
             "lower-affine",
+            "convert-math-to-llvm",
             "convert-arith-to-llvm",
             "convert-index-to-llvm=index-bitwidth=64",
             "convert-ub-to-llvm",

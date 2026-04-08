@@ -4,7 +4,7 @@ from xdsl.builder import Builder, InsertPoint
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp, LLVMPointerType
 from xdsl.dialects.builtin import IntegerType, f64, MemRefType
 from xdsl.dialects.stencil import FieldType, StencilBoundsAttr, TempType
-
+from xdsl.dialects import llvm
 from xdsl.dialects.func import FuncOp as FuncFuncOp
 from .ops_dialect import * 
 
@@ -46,73 +46,37 @@ class LowerParLoopPass(ModulePass):
         """Lower a single ops.par_loop operation"""
         
         builder = Builder(InsertPoint.before(par_loop))
-        
-        # block_info = self.extract_block_info(builder, par_loop.block) 
-        # dim_info = self.extract_dim_info(builder, par_loop.dim)
-        # range_info = self.extract_range_info(builder, par_loop.range_ptr, dim_info)
+     
+        field_operands = []
+        reduction_operands = []
 
-        args_info = []
-        for ops_arg_ptr in par_loop.args:
+        for ops_arg_ptr in par_loop.dats:
             # extract data from each arg_dat
-            # access = self.extract_arg_access(builder, ops_arg)
 
             ops_arg = self.extract_arg(builder, ops_arg_ptr)
-
             dat = self.extract_arg_dat(builder, ops_arg)
-
-            # self.extract_arg_dat_size(builder, dat)
-
             data = self.extract_arg_dat_data(builder, dat)
-
             data_ref = self.create_ptr_to_ref(builder, data)
-
             data_field = self.create_ref_to_field(builder, data_ref)
 
-            # data_temp = self.create_field_to_temp(builder, data_field)
+            field_operands.append(data_field)
 
-            # args_info.append(data_temp)
-            args_info.append(data_field)
+
+         # Process reduction arguments
+        for ops_arg_ptr in par_loop.reductions:
+            # ops_arg = self.extract_arg(builder, ops_arg_ptr)
+            ops_reduction = self.extract_arg_reduction_handle(builder, ops_arg_ptr)
+            reduction_data_ptr = self.extract_reduction_data_ptr(builder, ops_reduction)
+            reduction_operands.append(reduction_data_ptr)
+
 
         builder.insert(ComputeOp.create(
-            operands=[*args_info],
+            operands=[*field_operands, *reduction_operands],
         ))
 
         par_loop.detach()
         par_loop.erase()
     
-    def extract_block_info(self, builder, block_struct):
-        """
-        Extract info from ops_block
-        """
-
-        return builder.insert(ExtractBlockOp.create(
-            operands=[block_struct],
-            result_types=[IntegerType(32)]
-        ))
-    
-    def extract_dim_info(self, builder, dim_value):
-        """
-        Extract dimension info
-        """
-        op = builder.insert(ExtractDimOp.create(
-            operands=[dim_value],
-            result_types=[IntegerType(32)],
-        ))
-
-        op.result.name_hint = "dim"
-        return op
-    
-    def extract_range_info(self, builder, range_ptr, dim_info):
-        """
-        Extract iteration range
-        """
-        op = builder.insert(ExtractRangeOp.create(
-            operands=[range_ptr, dim_info.results[0]],
-            result_types=[IntegerType(32)]
-        ))
-
-        op.result.name_hint = "range"
-        return op.results
     
     def extract_arg(self, builder, ops_arg_ptr):
         """
@@ -149,32 +113,6 @@ class LowerParLoopPass(ModulePass):
 
         op.result.name_hint = "data_ptr"
         return op.result
-    
-
-    def extract_arg_dat_size(self, builder, ops_dat_struct):
-        """
-        Extract size from ops_arg_dat
-        """
-        op = builder.insert(ExtractArgDatSizeOp.create(
-            operands=[ops_dat_struct],
-            result_types=[LLVMArrayType.from_size_and_type(
-            OPS_MAX_DIM, i32)]
-        ))
-
-        op.result.name_hint = "size"
-        return op.results
-
-    def extract_arg_access(self, builder, ops_arg_struct):
-        """
-        Extract arg_access from ops_arg
-        """
-        op = builder.insert(ExtractArgAccessOp.create(
-            operands=[ops_arg_struct],
-            result_types=[i32]
-        ))
-
-        op.result.name_hint = "access_type"
-        return op.result
 
     
     def create_ptr_to_ref(self, builder, data_ptr):
@@ -206,17 +144,37 @@ class LowerParLoopPass(ModulePass):
         op.result.name_hint = "data_field"
         return op.result
 
-
-    def create_field_to_temp(self, builder, data_ref):
+    
+    def extract_arg_reduction_handle(self, builder: Builder, ops_arg: SSAValue) -> SSAValue:
         """
-        Take the data field and put it in a placeholder
-        to convert to a stencil.temp
+        Extract the reduction handle pointer from ops_arg.
+        ops_arg.data contains the ops_reduction pointer.
         """
-
-        op = builder.insert(StencilFieldToTemp.create(
-            operands=[data_ref],
-            result_types=[TempType(self.config.grid_size, f64)] 
+        # Extract ops_arg.data (field 4)
+        data_ptr_ptr = builder.insert(llvm.GEPOp.from_mixed_indices(
+            ops_arg,
+            indices=[0, 4],
+            result_type=LLVMPointerType(),
+            pointee_type=ops_arg_type
         ))
+        ops_reduction_ptr = builder.insert(llvm.LoadOp(data_ptr_ptr, LLVMPointerType()))
+        data_ptr_ptr.result.name_hint = "reduction_handle_ptr_ptr"
+        ops_reduction_ptr.results[0].name_hint = "reduction_handle"
+        return ops_reduction_ptr.results[0]
 
-        op.result.name_hint = "data_temp"
-        return op.result
+    def extract_reduction_data_ptr(self, builder: Builder, ops_reduction: SSAValue) -> SSAValue:
+        """
+        Extract the actual data pointer from ops_reduction.
+        ops_reduction->data is where the reduction value is stored.
+        """
+        # Extract ops_reduction->data (field 0)
+        reduction_data_ptr_ptr = builder.insert(llvm.GEPOp.from_mixed_indices(
+            ops_reduction,
+            indices=[0, 0],
+            result_type=LLVMPointerType(),
+            pointee_type=ops_reduction_type
+        ))
+        reduction_data_ptr = builder.insert(llvm.LoadOp(reduction_data_ptr_ptr, LLVMPointerType()))
+        reduction_data_ptr_ptr.result.name_hint = "reduction_data_ptr_ptr"
+        reduction_data_ptr.results[0].name_hint = "reduction_data_ptr"
+        return reduction_data_ptr.results[0]

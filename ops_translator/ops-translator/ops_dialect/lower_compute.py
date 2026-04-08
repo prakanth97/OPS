@@ -6,8 +6,9 @@ from xdsl.builder import Builder, InsertPoint
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp
 from xdsl.dialects.builtin import IntegerType, f32, f64, Region
 from xdsl.dialects.stencil import ApplyOp, TempType, Block, AllocOp, ReturnOp, FieldType, ExternalLoadOp, LoadOp, StencilBoundsAttr, StoreOp, AccessOp
-
-from .ops_dialect import *
+from xdsl.dialects import stencil
+from .ops_dialect import ReturnOp as OPSReturnOp
+from .ops_dialect import ComputeOp
 from xdsl.dialects.llvm import LLVMFunctionType, LLVMPointerType, LLVMVoidType
 from xdsl.dialects.func import FuncOp as FuncFuncOp
 
@@ -47,10 +48,7 @@ class LowerComputePass(ModulePass):
         builder = Builder(InsertPoint.before(compute_op))
 
         range_bounds = StencilBoundsAttr(self.config.iteration_bounds)
-        
         temp_type = TempType(self.config.grid_size, f64)
-
-        kernel_params = self.config.kernel_info.param_order
 
         read_field_operands = []
     
@@ -61,6 +59,30 @@ class LowerComputePass(ModulePass):
             else:
                 raise ValueError(f"Missing operand for read field at position {temp_operand_idx}")
 
+        # num_field_operands = len(self.config.kernel_info.read_fields) + len(self.config.kernel_info.write_fields)
+
+        num_field_operands = len(
+            set(self.config.kernel_info.read_fields) |
+            set(self.config.kernel_info.write_fields)
+        )
+
+        reduction_operands = []
+        # print(self.config.kernel_info.reductions)
+
+        # print("----------------")
+        # # print(compute_op)
+        # print(len(self.config.kernel_info.reductions))
+        # print(len(compute_op.operands))
+
+        # print(num_field_operands)
+        # exit(0)
+        for i in range(len(self.config.kernel_info.reductions)):
+            reduction_idx = num_field_operands + i
+            if reduction_idx < len(compute_op.operands):
+                reduction_operands.append(compute_op.operands[reduction_idx])
+            else:
+                raise ValueError(f"Missing operand for reduction at position {i}")
+
         body_block = Block(arg_types=[
             temp_type  # One for each read field
             for _ in self.config.kernel_info.read_fields
@@ -68,7 +90,8 @@ class LowerComputePass(ModulePass):
         
         stencil_ops = self.kernel_parser.kernel_info_to_stencil_ops(
             kernel_info=self.config.kernel_info,
-            temp_args= body_block.args
+            temp_args= body_block.args,
+            global_consts=self.config.global_consts
         )
         
         # Add all ops to the body block
@@ -76,11 +99,11 @@ class LowerComputePass(ModulePass):
             body_block.add_op(op)
         body = Region([body_block])
 
-        # Replace ops.yield with stencil.return in the body
+        # Replace ops.return with stencil.return in the body
         block = body.blocks[0]
         for op in list(block.ops):
-            if isinstance(op, YieldOp):
-                return_op = ReturnOp.get(list(op.operands))
+            if isinstance(op, OPSReturnOp):
+                return_op = stencil.ReturnOp.get(list(op.operands))
                 block.insert_op_before(return_op, op)
                 block.erase_op(op)
 
@@ -96,13 +119,18 @@ class LowerComputePass(ModulePass):
 
         
         # Build apply op using buffer semantics
+
+        # print(f"Read fields: {len(read_field_operands)}")
+        # print(f"Write fields: {len(write_field_operands)}")
+        # print(f"Reductions: {len(reduction_operands)}")
+        # print(f"Reduction operands: {reduction_operands}")
         apply_op = ApplyOp.build(
-            operands=[read_field_operands, write_field_operands], # actual FIELDS
+            operands=[read_field_operands, write_field_operands, reduction_operands], # actual FIELDS
             regions=[body],
             result_types=[[]], # no result, as we don't return a temp
             properties={"bounds": range_bounds}
         )
-      
+
         builder.insert(apply_op)
 
         compute_op.detach()

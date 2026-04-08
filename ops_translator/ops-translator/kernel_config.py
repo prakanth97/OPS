@@ -1,17 +1,29 @@
 from dataclasses import dataclass
-from typing import List, Tuple
-from ops import Loop, Dat
+from typing import List, Tuple, Literal, Any
+from ops import Loop, Dat, ArgReduce, ArgIdx, Arg, ArgDat
 from kernel_parser import KernelInfo
+from store import Program
+
+@dataclass
+class ArgInfo:
+    """Information about a single ops_arg"""
+    index: int  # Position in original args list
+    arg_type: Literal["dat", "idx", "reduce"]
+    arg: Arg  # The actual arg object
 
 @dataclass
 class KernelConfig:
     name: str
     iteration_bounds: List[Tuple[int, int]]
     grid_size: List[int]
-    dats: List[Dat]
     kernel_info: KernelInfo
+    dats: List[Dat]
+    reductions: List[ArgReduce]
+    has_idx: bool
+    arg_order: List[ArgInfo]
+    global_consts: dict[str, Any]
 
-def generateKernelConfig(function_name: str, loop: Loop) -> KernelConfig:
+def generateKernelConfig(function_name: str, loop: Loop, program: Program) -> KernelConfig:
     
     print("LOOP")
     print(loop)
@@ -36,13 +48,35 @@ def generateKernelConfig(function_name: str, loop: Loop) -> KernelConfig:
         loop.ndim,
         dat.d_m
     )
-    
+
+    reduction_args = [arg for arg in loop.args if isinstance(arg, ArgReduce)]
+    has_idx = any(isinstance(arg, ArgIdx) for arg in loop.args)
+
+    arg_order = []
+    print("LOOP ARGS AHHH")
+    print(loop.args)
+    for i, arg in enumerate(loop.args):
+        if isinstance(arg, ArgDat):
+            arg_order.append(ArgInfo(i, "dat", arg))
+        elif isinstance(arg, ArgIdx):
+            arg_order.append(ArgInfo(i, "idx", arg))
+        elif isinstance(arg, ArgReduce):
+            arg_order.append(ArgInfo(i, "reduce", arg))
+
+    print(" ")
+    print("ARG ORDER")
+    print(arg_order)
+
     return KernelConfig(
         name=function_name,
         iteration_bounds=normalized_bounds,
         grid_size=physical_size,
         dats=loop.dats,
         kernel_info=None,
+        reductions=reduction_args,
+        has_idx=has_idx,
+        arg_order=arg_order,
+        global_consts=program.const_values
     )
 
     # Example bounds

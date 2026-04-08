@@ -7,8 +7,8 @@ from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
 from ops_dialect.lower_extractions import LowerOpsExtractionsPass
 from ops_dialect.lower_ptr_to_memref import LowerPtrToMemrefPass
-from ops_dialect.replacebuffer import ReplaceStencilBufferWithOriginal
-
+from ops_dialect.lower_index import LowerOpsIndexPass
+import xdsl
 from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
 from xdsl.transforms.stencil_bufferize import StencilBufferize
 from xdsl.transforms.canonicalize import CanonicalizePass
@@ -72,7 +72,7 @@ class Pipeline(Findable):
         xdsl_ctx = Context()
 
         ir_module = create_function_with_wrapper(kernel_config)
-        ir_module = add_ops_operations(ir_module)
+        ir_module = add_ops_operations(ir_module, kernel_config)
 
 
         pm = xDSLPassManager([
@@ -80,22 +80,25 @@ class Pipeline(Findable):
             LowerComputePass(kernel_config),
             LowerOpsExtractionsPass(),
             LowerPtrToMemrefPass(),
-            StencilBufferize(),
-            ReplaceStencilBufferWithOriginal(),
+            # StencilBufferize(), no longer needed!
             ConvertStencilToLLMLIRPass(),
+            LowerOpsIndexPass(),
             CanonicalizePass(),
         ])
 
         pm.apply(xdsl_ctx, ir_module)
 
-        print(ir_module)
+        # print(ir_module)
 
+        # with open("demofile.mlir", "w") as f:
+        #     f.write(str(ir_module))
+        # exit(0)
 
-        with open("demofile.mlir", "w") as f:
-            f.write(str(ir_module))
+        
 
 
         # return None
+        # exit(0)
         # return ir_module
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
@@ -113,6 +116,11 @@ class Pipeline(Findable):
         Printer(stream=buf).print_op(xdsl_module)
 
         ctx = mlir_ir.Context()
+        
+        print("--------------------")
+        print(xdsl_module)
+        print("--------------------")
+
         mlir_module = mlir_ir.Module.parse(buf.getvalue(), context=ctx)
 
         return mlir_module, ctx
@@ -134,6 +142,10 @@ class Pipeline(Findable):
             pm.add(p)
         pm.run(op)
 
+
+        with open("demofile.mlir", "w") as f:
+            f.write(str(mlir_module))
+        # exit(0)
         print(mlir_module)
         print("CHECK POINT --------------")
 
@@ -141,10 +153,10 @@ class Pipeline(Findable):
 
 
         # equivalent to running mlir-translate
+        res = translate_module_to_llvmir(mlir_module.operation)
         with open("output.mlir", "w") as f:
             f.write(str(mlir_module))
         print("Wrote MLIR to output.mlir")
-        res = translate_module_to_llvmir(mlir_module.operation)
 
 
         # Replace nuw to make compilation valid

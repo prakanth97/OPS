@@ -62,3 +62,19 @@ ops_arg_type = LLVMStructType(
         IntegerType(32)    # opt
     ])
 )
+
+
+ops_reduction_type = LLVMStructType(
+    StringAttr("struct.ops_reduction_core"),
+    ArrayAttr([
+        LLVMPointerType(),     # 0: char *data
+        IntegerType(32),       # 1: int size
+        IntegerType(32),       # 2: int initialized
+        IntegerType(32),       # 3: int index
+        IntegerType(32),       # 4: ops_access acc (enum, stored as int)
+        LLVMPointerType(),     # 5: char *type
+        LLVMPointerType(),     # 6: char *name
+        LLVMPointerType(),     # 7: OPS_instance *instance
+    ])
+)
+

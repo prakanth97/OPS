@@ -132,30 +132,59 @@ class Pipeline(Findable):
         ctx: Context
     ) -> str:
         """Run a list of MLIR passes on the MLIR module."""
-        passes = self.passes()
+        # passes = self.passes()
 
+        # op = mlir_module.operation
+
+        # pm = MLIRPassManager(context=ctx)
+
+        # for p in passes:
+        #     pm.add(p)
+        # pm.run(op)
+
+
+        # with open("demofile.mlir", "w") as f:
+        #     f.write(str(mlir_module))
+
+        # print(mlir_module)
+        # print("CHECK POINT --------------")
+
+        # # After your lowering passes, before mlir-translate
+
+
+        # # equivalent to running mlir-translate
+        # res = translate_module_to_llvmir(mlir_module.operation)
+        # with open("output.mlir", "w") as f:
+        #     f.write(str(mlir_module))
+        # print("Wrote MLIR to output.mlir")
+
+
+        passes = self.passes()
         op = mlir_module.operation
 
-        pm = MLIRPassManager(context=ctx)
+        for i, p in enumerate(passes):
+            print(f"\n=== Running pass {i}: {p} ===")
 
-        for p in passes:
+            pm = MLIRPassManager(context=ctx)
             pm.add(p)
-        pm.run(op)
 
+            pm.run(op)
 
-        with open("demofile.mlir", "w") as f:
-            f.write(str(mlir_module))
-        # exit(0)
-        print(mlir_module)
-        print("CHECK POINT --------------")
+            # Print IR after this pass
+            print(f"\n--- IR after pass {i} ({p}) ---")
+            # print(mlir_module)
+            # print("CHECK POINT --------------")
 
-        # After your lowering passes, before mlir-translate
+            # Optional: dump to file per pass
+            with open(f"demofile_pass_{i}.mlir", "w") as f:
+                f.write(str(mlir_module))
 
-
-        # equivalent to running mlir-translate
+        # Final translation step
         res = translate_module_to_llvmir(mlir_module.operation)
+
         with open("output.mlir", "w") as f:
             f.write(str(mlir_module))
+
         print("Wrote MLIR to output.mlir")
 
 

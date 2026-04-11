@@ -75,40 +75,76 @@ class GPUCUDA(Pipeline):
         return self._gpu_sm
     
     def passes(self) -> List[str]:
-        nvvm_target = f"chip=sm_{self.gpu_sm},triple=nvptx64-nvidia-cuda"
-        
+        nvvm_target = f"O=3 ftz fast chip=sm_{self.gpu_sm},triple=nvptx64-nvidia-cuda"
+
+        block_sizes: list[int] = [
+            target for target, dim in zip([2, 2], ["x", "y"])
+        ]
+
+        block_sizes_str = ",".join(map(str, block_sizes))
+
         return [
             "convert-bufferization-to-memref",
             "canonicalize",
             "cse",
-            "gpu-map-parallel-loops",
-            "convert-parallel-loops-to-gpu",
-            "gpu-kernel-outlining",
-            "convert-gpu-to-nvvm",
-            f"nvvm-attach-target={nvvm_target}",
-            "convert-scf-to-cf",
-            "lower-affine",
-            "convert-math-to-llvm",
-            "convert-arith-to-llvm",
-            "convert-index-to-llvm=index-bitwidth=64",
-            "convert-ub-to-llvm",
-            "expand-strided-metadata",
-            "convert-nvvm-to-llvm",
-            "convert-to-llvm",
-            "canonicalize",
-            "cse",
-            "gpu-module-to-binary",
-            "gpu-to-llvm",
-            "finalize-memref-to-llvm",
-            "convert-func-to-llvm",
-            "convert-cf-to-llvm",
             "reconcile-unrealized-casts",
+
+            f"scf-parallel-loop-tiling{{parallel-loop-tile-sizes={block_sizes_str}}}",
+            
+            "gpu-map-parallel-loops",
+            
+            "convert-parallel-loops-to-gpu",
+            
             "canonicalize",
             "cse",
+            "fold-memref-alias-ops",
+            
+            "gpu-kernel-outlining",
+
+            "canonicalize",
+            "cse",
+            "fold-memref-alias-ops",
+
+            "expand-strided-metadata",
+            "lower-affine",
+            "canonicalize",
+            "cse",
+            "func.func(gpu-async-region)",
+            "canonicalize",
+            "cse",
+            
+            "convert-arith-to-llvm",
+            "convert-math-to-llvm",
+            "convert-scf-to-cf",
+            "convert-cf-to-llvm",
+            "canonicalize",
+            "cse",
+
+            "convert-func-to-llvm{use-bare-ptr-memref-call-conv}",
+
+            f"nvvm-attach-target{{{nvvm_target}}}",
+
+            "gpu.module(convert-gpu-to-nvvm,canonicalize,cse)",
+            "gpu-to-llvm",
+            "gpu-module-to-binary",
+            "canonicalize",
+            "cse",
+            
+            # "convert-index-to-llvm=index-bitwidth=64",
+            # "convert-ub-to-llvm",
+            # "convert-nvvm-to-llvm",
+            # "convert-to-llvm",
+            # "canonicalize",
+            # "cse",
+            # "finalize-memref-to-llvm",
+
+
         ]
     
     def _detect_gpu_sm(self) -> str:
         """Auto-detect GPU compute capability"""
+        gpu_sm = 89
+        return gpu_sm
         
         # Check environment variable first
         gpu_sm = os.environ.get("OPS_GPU_SM")

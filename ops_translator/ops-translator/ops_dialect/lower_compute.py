@@ -35,7 +35,7 @@ class LowerComputePass(ModulePass):
     def apply(self, ctx, module):
 
         for func in module.walk():
-            if not isinstance(func, LLVMFuncOp):
+            if not isinstance(func, FuncFuncOp):
                 continue
 
             for op in list(func.walk()):

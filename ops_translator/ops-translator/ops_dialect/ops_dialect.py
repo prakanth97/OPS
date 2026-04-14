@@ -13,11 +13,12 @@ from xdsl.irdl import (
     var_result_def,
     attr_def,
     opt_operand_def,
+    opt_attr_def,
     AttrSizedOperandSegments
 )
 
 from xdsl.dialects.llvm import LLVMArrayType, LLVMPointerType, i32
-from xdsl.dialects.builtin import StringAttr, IntegerType, IntegerAttr
+from xdsl.dialects.builtin import StringAttr, IntegerType, IntegerAttr, BoolAttr
 
 from typing import List
 from .ops_types import *
@@ -94,6 +95,9 @@ class PointerToMemref(IRDLOperation):
     name = "ops.ptr_to_memref"
     ptr = operand_def()
     result = result_def()
+    is_reduction = opt_attr_def(BoolAttr)
+
+    # attribute which tells whether its mesh data or a reduction pointer
 
 
 @irdl_op_definition

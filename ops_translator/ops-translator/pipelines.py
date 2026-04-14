@@ -20,7 +20,7 @@ class CPUSequential(Pipeline):
             "lower-affine",
             "convert-math-to-llvm",
             "convert-arith-to-llvm",
-            "convert-func-to-llvm",
+            "convert-func-to-llvm{use-bare-ptr-memref-call-conv}",
             "expand-strided-metadata",
             "finalize-memref-to-llvm",
             "reconcile-unrealized-casts",
@@ -54,7 +54,7 @@ class OpenMP(Pipeline):
             "lower-affine",
             "convert-arith-to-llvm",
             "convert-math-to-llvm",
-            "convert-func-to-llvm",
+            "convert-func-to-llvm{use-bare-ptr-memref-call-conv}",
             "reconcile-unrealized-casts",
         ]
 
@@ -89,11 +89,11 @@ class GPUCUDA(Pipeline):
             "cse",
             "reconcile-unrealized-casts",
 
-            f"scf-parallel-loop-tiling{{parallel-loop-tile-sizes={block_sizes_str}}}",
+            # f"scf-parallel-loop-tiling{{parallel-loop-tile-sizes={block_sizes_str}}}",
+            "func.func(gpu-map-parallel-loops)",
+            "func.func(convert-parallel-loops-to-gpu)",
             
-            "gpu-map-parallel-loops",
-            
-            "convert-parallel-loops-to-gpu",
+            # "convert-parallel-loops-to-gpu",
             
             "canonicalize",
             "cse",

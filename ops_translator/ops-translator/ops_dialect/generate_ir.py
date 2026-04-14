@@ -37,6 +37,85 @@ from xdsl.ir import Block, Region
 from xdsl.builder import Builder, InsertPoint
 from kernel_config import KernelConfig
 
+
+def create_wrapper_func(config: KernelConfig) -> ModuleOp:
+    module = ModuleOp([])
+
+    builder = Builder(InsertPoint.at_start(module.body.block))
+
+    wrapper_name = config.name
+    # All parameters become pointers in the wrapper
+
+    param_types = [
+        LLVMPointerType(),  # name
+        ops_block_type,     # block
+        IntegerType(32),    # dim
+        LLVMPointerType(),  # range
+    ] + [LLVMPointerType() for _ in config.arg_order]  # ops_args
+
+    wrapper_param_types = [LLVMPointerType()] * len(param_types)
+    
+    # Create wrapper entry block
+    wrapper_entry = Block(arg_types=wrapper_param_types)
+    
+    # Create wrapper function
+    wrapper_fn = FuncOp(
+        name=wrapper_name,
+        function_type=FunctionType.from_lists(wrapper_param_types, []),
+        #     inputs=wrapper_param_types,
+        #     outputs=LLVMVoidType(),
+        # ),
+        # linkage=LinkageAttr("external"),
+        region=Region([wrapper_entry]),
+    )
+    
+    # Build the wrapper body
+    builder.insert(wrapper_fn)
+    builder = Builder(InsertPoint.at_end(wrapper_entry))
+    
+    # Track which params need loading:
+    # - param 0: LLVMPointerType (char*) - pass through
+    # - param 1: ops_block_type (pointer) - pass through
+    # - param 2: i32 - LOAD
+    # - param 3: LLVMPointerType (int*) - pass through
+    # - param 4+: ops_arg_type (struct) - LOAD
+    
+    loaded_args = []
+    for i, param_type in enumerate(param_types):
+        arg_ptr = wrapper_entry.args[i]
+                
+        # Only load i32 and struct types, pass pointers through
+        if isinstance(param_type, (LLVMPointerType)):
+            # Pass through pointers directly
+            loaded_args.append(arg_ptr)
+        else:
+            # Load value types (i32, struct)
+            loaded_op = builder.insert(llvm.LoadOp(arg_ptr, param_type))
+            loaded_args.append(loaded_op.results[0])
+
+
+
+
+
+    # Call the main function
+    # builder.insert(func.CallOp(
+    #     callee=wrapper_name + "_impl",
+    #     arguments=[*loaded_args],
+    #     return_types=[]    
+    # ))
+
+    
+    builder.insert(func.ReturnOp())
+    
+    return module
+
+
+
+
+
+
+
+
 def create_func_with_wrapper(config: KernelConfig) -> ModuleOp:
     module = ModuleOp([])
 
@@ -128,12 +207,19 @@ def generate_c_wrapper_func(wrapper_name: str, param_types: list, main_func: LLV
             loaded_op = builder.insert(llvm.LoadOp(arg_ptr, param_type))
             loaded_args.append(loaded_op.results[0])
 
+
+
+
+
     # Call the main function
     builder.insert(func.CallOp(
         callee=main_func.sym_name.data,
         arguments=[*loaded_args],
         return_types=[]    
     ))
+
+
+
     
     builder.insert(func.ReturnOp())
     
@@ -272,6 +358,9 @@ def create_par_loop(
 def add_ops_operations(module: ModuleOp, kernel_config: KernelConfig):
 
     fn = module.body.ops.first
+    print("------------")
+    print(fn)
+    # exit(0)cl
     fn_body = fn.body.blocks.first
 
     builder = Builder(InsertPoint.at_start(fn_body))

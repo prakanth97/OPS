@@ -1,11 +1,12 @@
 from xdsl.passes import ModulePass
 from xdsl.builder import Builder, InsertPoint
-
+from xdsl.ir import SSAValue, Block, Region
 from xdsl.dialects.llvm import FuncOp as LLVMFuncOp, LLVMPointerType
-from xdsl.dialects.builtin import IntegerType, f64, MemRefType
+from xdsl.dialects.builtin import IntegerType, f64, MemRefType, ModuleOp
 from xdsl.dialects.stencil import FieldType, StencilBoundsAttr, TempType
-from xdsl.dialects import llvm
+from xdsl.dialects import llvm, func
 from xdsl.dialects.func import FuncOp as FuncFuncOp
+
 from .ops_dialect import * 
 
 from kernel_config import KernelConfig
@@ -40,9 +41,9 @@ class LowerParLoopPass(ModulePass):
             
             for op in list(func.walk()):
                 if isinstance(op, ParLoopOp):
-                    self.lower_par_loop(op)
+                    self.lower_par_loop(op, module)
     
-    def lower_par_loop(self, par_loop: ParLoopOp):
+    def lower_par_loop(self, par_loop: ParLoopOp, module: ModuleOp):
         """Lower a single ops.par_loop operation"""
         
         builder = Builder(InsertPoint.before(par_loop))
@@ -62,17 +63,58 @@ class LowerParLoopPass(ModulePass):
             field_operands.append(data_field)
 
 
-         # Process reduction arguments
+        # Process reduction arguments
         for ops_arg_ptr in par_loop.reductions:
             # ops_arg = self.extract_arg(builder, ops_arg_ptr)
             ops_reduction = self.extract_arg_reduction_handle(builder, ops_arg_ptr)
             reduction_data_ptr = self.extract_reduction_data_ptr(builder, ops_reduction)
-            reduction_operands.append(reduction_data_ptr)
+            reduction_memref = self.create_red_ptr_to_ref(builder, reduction_data_ptr)
+            reduction_operands.append(reduction_memref)
 
 
-        builder.insert(ComputeOp.create(
-            operands=[*field_operands, *reduction_operands],
+        builder.insert(func.CallOp(
+            callee=self.config.name + "_impl",
+            arguments=[*field_operands, *reduction_operands],
+            return_types=[]    
         ))
+
+        # Make the impl function here
+        # Then call it with the arguments (field_operands and reduction_operands)
+        # Then place the ops.compute op in the impl function
+
+        # ---------------------------
+
+        builder = Builder(InsertPoint.at_end(module.body.block))  
+
+        param_types = [v.type for v in [*field_operands, *reduction_operands]]
+
+        entry_block = Block(arg_types=param_types)
+
+        # add name hints to parameters
+        for i in range(len(entry_block.args)):
+            entry_block.args[i].name_hint = 'ops_arg' + str(i)
+
+        fn = func.FuncOp(
+            name=self.config.name + "_impl",
+            function_type=func.FunctionType.from_lists(param_types, []),
+            #     inputs=param_types,
+            #     outputs=LLVMVoidType(),
+            # ),
+            # linkage=LinkageAttr("external"),
+            region=Region([entry_block]),
+        )
+
+        fn_op = builder.insert(fn)
+
+        builder1 = Builder(InsertPoint.at_end(entry_block))
+
+        builder1.insert(ComputeOp.create(
+            operands=[*(fn_op.args)], #? 
+        ))
+
+        builder1.insert(func.ReturnOp())
+
+        # ---------------------------
 
         par_loop.detach()
         par_loop.erase()
@@ -121,9 +163,11 @@ class LowerParLoopPass(ModulePass):
         to convert to a memref
         """
 
+        sizes = [end - start for start, end in self.config.grid_size]
         op = builder.insert(PointerToMemref.create(
             operands=[data_ptr],
-            result_types=[MemRefType(f64, [8, 1])] 
+            result_types=[MemRefType(f64, sizes)],
+            attributes={"is_reduction": BoolAttr.from_bool(False)}
         ))
 
         op.result.name_hint = "data_ref"
@@ -138,7 +182,7 @@ class LowerParLoopPass(ModulePass):
 
         op = builder.insert(MemrefToStencilField.create(
             operands=[data_ref],
-            result_types=[FieldType(StencilBoundsAttr([(0, 8), (0, 8)]), f64)] 
+            result_types=[FieldType(StencilBoundsAttr(self.config.grid_size), f64)] 
         ))
 
         op.result.name_hint = "data_field"
@@ -178,3 +222,19 @@ class LowerParLoopPass(ModulePass):
         reduction_data_ptr_ptr.result.name_hint = "reduction_data_ptr_ptr"
         reduction_data_ptr.results[0].name_hint = "reduction_data_ptr"
         return reduction_data_ptr.results[0]
+    
+    
+    def create_red_ptr_to_ref(self, builder, data_ptr):
+        """
+        Take the data pointer and put it in a placeholder
+        to convert to a memref
+        """
+
+        op = builder.insert(PointerToMemref.create(
+            operands=[data_ptr],
+            result_types=[MemRefType(f64, [])],
+            attributes={"is_reduction": BoolAttr.from_bool(True)}
+        ))
+
+        op.result.name_hint = "data_ref"
+        return op.result

@@ -1,7 +1,7 @@
 from util import Findable
 from strategy import Strategy
 from store import Application, Program
-from ops_dialect.generate_ir import create_function_with_wrapper, add_ops_operations
+from ops_dialect.generate_ir import create_wrapper_func, create_function_with_wrapper, create_func_with_wrapper, add_ops_operations
 from xdsl.context import Context
 from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
@@ -12,9 +12,10 @@ import xdsl
 from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
 from xdsl.transforms.stencil_bufferize import StencilBufferize
 from xdsl.transforms.canonicalize import CanonicalizePass
+from xdsl.transforms.gpu_map_parallel_loops import GpuMapParallelLoopsPass
 from kernel_config import KernelConfig, attachKernelInfo
 from language import Lang
-
+from xdsl.transforms.scf_parallel_loop_tiling import ScfParallelLoopTilingPass
 from xdsl.printer import Printer
 from io import StringIO
 from mlir.passmanager import PassManager as MLIRPassManager
@@ -71,31 +72,56 @@ class Pipeline(Findable):
         # Build starting IR
         xdsl_ctx = Context()
 
-        ir_module = create_function_with_wrapper(kernel_config)
+        ir_module = create_wrapper_func(kernel_config)
         ir_module = add_ops_operations(ir_module, kernel_config)
+
+        # ir_module = create_func_with_wrapper(kernel_config)
+
+        # print(ir_module)
+        # exit(0)
 
 
         pm = xDSLPassManager([
             LowerParLoopPass(kernel_config),
             LowerComputePass(kernel_config),
             LowerOpsExtractionsPass(),
-            LowerPtrToMemrefPass(),
-            # StencilBufferize(), no longer needed!
+            LowerPtrToMemrefPass(kernel_config),
+            # # # StencilBufferize(), no longer needed!
             ConvertStencilToLLMLIRPass(),
             LowerOpsIndexPass(),
-            CanonicalizePass(),
+            CanonicalizePass()
         ])
 
         pm.apply(xdsl_ctx, ir_module)
 
+        # # print(ir_module)
         # print(ir_module)
-
-        # with open("demofile.mlir", "w") as f:
-        #     f.write(str(ir_module))
         # exit(0)
 
-        
+        with open("demofile.mlir", "w") as f:
+            f.write(str(ir_module))
+        # exit(0)
 
+        if (self.strategy.name == "gpu_nvvm"):
+            pm = xDSLPassManager([
+                GpuMapParallelLoopsPass(),
+            ])
+
+            pm.apply(xdsl_ctx, ir_module)
+
+        print(ir_module)
+
+
+        # # read in ir_module from file
+        # print("RUN ---------------------")
+        # with mlir_ir.Context() as ctx:
+        #     # ctx.allow_unregistered_dialects = True
+        #     with open("mapping.mlir", "r") as f:
+        #         module = mlir_ir.Module.parse(f.read())
+            
+        #     pm = MLIRPassManager.parse("builtin.module(func.func(convert-parallel-loops-to-gpu))")
+        #     pm.run(module.operation)
+        #     print(module)
 
         # return None
         # exit(0)
@@ -158,6 +184,9 @@ class Pipeline(Findable):
         #     f.write(str(mlir_module))
         # print("Wrote MLIR to output.mlir")
 
+        print("----------------------------")
+        print("RUNNING MLIR PASSES")
+        print("----------------------------")
 
         passes = self.passes()
         op = mlir_module.operation
@@ -166,7 +195,13 @@ class Pipeline(Findable):
             print(f"\n=== Running pass {i}: {p} ===")
 
             pm = MLIRPassManager(context=ctx)
+
+            # if p == "gpu-map-parallel-loops"    :
+            #     pm.add(f"builtin.module(func.func({p}))")
+            # else:
             pm.add(p)
+
+            # pm.add(p)
 
             pm.run(op)
 
@@ -177,6 +212,8 @@ class Pipeline(Findable):
 
             # Optional: dump to file per pass
             with open(f"demofile_pass_{i}.mlir", "w") as f:
+                f.write(p)
+                f.write("\n")
                 f.write(str(mlir_module))
 
         # Final translation step
@@ -191,6 +228,7 @@ class Pipeline(Findable):
         # Replace nuw to make compilation valid
         # TODO: work out reason for this - I think compiler / mlir version mismatches
         res = res.replace(" nuw ", " ")
+        res = res.replace("nocreateundeforpoison ", "")
 
         return res
 

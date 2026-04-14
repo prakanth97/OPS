@@ -21,8 +21,8 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_extract_arg_dat(op)
             elif isinstance(op, ExtractArgDatDataOp):
                 self.lower_extract_arg_dat_data(op)
-            elif isinstance(op, PointerToMemref):
-                self.lower_ptr_to_memref(op)
+            # elif isinstance(op, PointerToMemref):
+            #     self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
 
@@ -106,36 +106,36 @@ class LowerOpsExtractionsPass(ModulePass):
         op.detach()
         op.erase()
 
-    def lower_ptr_to_memref(self, op: PointerToMemref):
+    # def lower_ptr_to_memref(self, op: PointerToMemref):
         
-        builder = Builder(InsertPoint.before(op))
+    #     builder = Builder(InsertPoint.before(op))
 
-        # Convert pointer to memref
-        total_size_0 = 8
-        total_size_1 = 8
+    #     # Convert pointer to memref
+    #     total_size_0 = 8
+    #     total_size_1 = 8
 
-        ref_type = MemRefType(f64, [total_size_0, total_size_1])
+    #     ref_type = MemRefType(f64, [total_size_0, total_size_1])
 
 
-        ref = memref.ReinterpretCastOp(
-            source=op.operands[0],
-            result_type=ref_type,
-            static_offsets=[0],
-            static_sizes=[8, 8],
-            static_strides=[8, 1],
-            offsets=[],
-            sizes=[],
-            strides=[]
-        )
+    #     ref = memref.ReinterpretCastOp(
+    #         source=op.operands[0],
+    #         result_type=ref_type,
+    #         static_offsets=[0],
+    #         static_sizes=[8, 8],
+    #         static_strides=[8, 1],
+    #         offsets=[],
+    #         sizes=[],
+    #         strides=[]
+    #     )
 
-        ref.results[0].name_hint = "data_ref"
+    #     ref.results[0].name_hint = "data_ref"
 
-        builder.insert(ref)
+    #     builder.insert(ref)
  
-        op.results[0].replace_all_uses_with(ref.results[0])
+    #     op.results[0].replace_all_uses_with(ref.results[0])
 
-        op.detach()
-        op.erase()
+    #     op.detach()
+    #     op.erase()
 
 
     def lower_memref_to_field(self, op: MemrefToStencilField):

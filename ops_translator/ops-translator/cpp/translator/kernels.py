@@ -1,9 +1,6 @@
-from typing import Callable, List, Optional, Tuple
-
-from clang.cindex import Cursor, CursorKind, SourceRange
-
-import ops
-from store import Application, Entity, Function, Type
+from typing import Callable, List, Tuple
+from clang.cindex import CursorKind, SourceRange
+from store import Application, Entity, Type
 from util import Location, Rewriter, Span, safeFind
 
 def extentToSpan(extent: SourceRange) -> Span:

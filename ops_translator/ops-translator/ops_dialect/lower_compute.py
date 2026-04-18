@@ -67,15 +67,7 @@ class LowerComputePass(ModulePass):
         )
 
         reduction_operands = []
-        # print(self.config.kernel_info.reductions)
-
-        # print("----------------")
-        # # print(compute_op)
-        # print(len(self.config.kernel_info.reductions))
-        # print(len(compute_op.operands))
-
-        # print(num_field_operands)
-        # exit(0)
+        
         for i in range(len(self.config.kernel_info.reductions)):
             reduction_idx = num_field_operands + i
             if reduction_idx < len(compute_op.operands):
@@ -120,10 +112,6 @@ class LowerComputePass(ModulePass):
         
         # Build apply op using buffer semantics
 
-        # print(f"Read fields: {len(read_field_operands)}")
-        # print(f"Write fields: {len(write_field_operands)}")
-        # print(f"Reductions: {len(reduction_operands)}")
-        # print(f"Reduction operands: {reduction_operands}")
         apply_op = ApplyOp.build(
             operands=[read_field_operands, write_field_operands, reduction_operands], # actual FIELDS
             regions=[body],

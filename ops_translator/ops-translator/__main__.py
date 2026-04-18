@@ -237,68 +237,10 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, lang: Lang, l
     include_dirs = set([Path(dir) for [dir] in args.I])
     defines = [define for [define] in args.D]
 
-
-
-    # Extract needed details (test)
-
-    # print(app)
-
-    # program_path = app.programs[0].path
-    # print(f'Program path: {program_path}')
-
-    # cur_loop = app.programs[0].loops[10]
-    # kernel_name = cur_loop.kernel
-    # print(f'Kernel name: {kernel_name}') # gives "apply_stencil"
-
-    # print(cur_loop.dats)
-
-    # arg1 = cur_loop.args[0] # arg_dat
-
-    # dat_id_to_dat = {}
-
-    # for dat in cur_loop.dats:
-    #     dat_id_to_dat[dat.id] = dat
-
-    # # detect if ArgDat
-    # if (isinstance(arg1, ops.ArgDat)):
-    #     access_type = arg1.access_type
-    #     base_type = dat_id_to_dat[arg1.dat_id].typ
-
-    #     print(access_type) # AccessType.OPS_READ
-    #     print(base_type)   # double (C-style formatter)
-
-
-    # arg2 = cur_loop.args[1] # arg_dat
-    # if (isinstance(arg2, ops.ArgDat)):
-    #     access_type = arg2.access_type
-    #     base_type = dat_id_to_dat[arg1.dat_id].typ
-
-    #     print(access_type)
-    #     print(base_type)
-
-
-
-
-    # arg3 = cur_loop.args[2] # arg_reduce
-    # print(arg3)
-
-
-    # for stencil in cur_loop.stencils:
-    #     # stencil points and strides are set to 0 - which is a bit sht
-    #     print(stencil)
-    
-    # # ops_arg_dat_dim = app.programs[0].loops[0].block.dats[0].dim
-    # # print(f'Ops_arg_dat_dims: {ops_arg_dat_dim}')
-
-
-    kernel_configs = {} # function name -> config details
-
     # Generate loop hosts --> IR for each kernel
     for i, (loop, program) in enumerate(app.loops(), 1):
 
         function_name = loop_to_function_name[loop]
-
-        print(function_name)
 
         config = generateKernelConfig(function_name, loop, program)
 
@@ -318,60 +260,6 @@ def codegen(args: Namespace, pipeline: Pipeline, app: Application, lang: Lang, l
 
             if args.verbose:
                 print(f"Generated loop host {i} of {len(app.uniqueLoops())}: {path}")
-
-    # Generate the master kernel file using extern declarations
-    path = Path(args.out, "master_kernel.h")
-
-    with open(path, "w") as file:
-        file.write("#include \"ops_lib_core.h\"\n\n")
-    
-        for lh, p in app.loops():
-            # Build the ops_par_loop function signature
-            # Format: ops_par_loop_<kernel>(const char*, ops_block, int, int*, ops_arg, ops_arg, ...)
-            
-            function_name = loop_to_function_name[lh]
-
-            num_args = len(lh.args)
-            ops_args = ", ".join([f"ops_arg" for _ in range(num_args)])
-            
-            if num_args > 0:
-                signature = f'extern "C" void {function_name}(const char* name, ops_block block, int dim, int* range, {ops_args});'
-            else:
-                signature = f'extern "C" void {function_name}(const char* name, ops_block block, int dim, int* range);'
-            
-            file.write(signature + "\n")
-
-
-
-    # Generate master kernel file
-    # if scheme.master_kernel_template is not None:
-
-    #     user_types_name = f"user_types.{scheme.lang.include_ext}"
-    #     user_types_candidates = [Path(dir, user_types_name) for dir in include_dirs]
-    #     user_types_file = safeFind(user_types_candidates, lambda p: p.is_file())
-
-    #     source, name = scheme.genMasterKernel(env, app, user_types_file, force_soa)
-
-    #     new_source = re.sub(r'\n\s*\n', '\n\n', source)
-
-    #     path = None
-
-    #     if scheme.lang.kernel_dir:
-    #         Path(args.out, scheme.target.name).mkdir(parents=True, exist_ok=True)
-    #         path = Path(args.out, scheme.target.name, name)
-
-    #     else:
-    #         path = Path(args.out, name)
-
-    #     with open(path, "w") as file:
-    #         if(scheme.target.name == "f2c_mpi_openmp" or scheme.target.name == "f2c_cuda" or scheme.target.name == "f2c_hip" or scheme.target.name == "f2c_sycl"):
-    #             file.write(f"// Auto-generated at {datetime.now()} by ops-translator\n")
-    #         else:
-    #             file.write(f"{scheme.lang.com_delim} Auto-generated at {datetime.now()} by ops-translator\n")
-    #         file.write(new_source)
-
-    #         if args.verbose:
-    #             print(f"Generated master kernel file: {path}")
 
 
 def isDirPath(path):

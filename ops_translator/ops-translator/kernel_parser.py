@@ -76,7 +76,6 @@ class KernelParser:
         """Parse the kernel function to extract stencil information"""
         
         # 1. Extract parameters
-
         read_fields = []
         write_fields = []
         read_write_fields = []
@@ -116,10 +115,9 @@ class KernelParser:
                 read_fields.append(param_name)
                 write_fields.append(param_name)
             else:
-                raise ParseError(f"Unknown access type: {access_type}")
+                raise ParseError(f"Unknown access type: {access_type}")        
 
-        
-
+        # 2. Find the assignment statement in the function body
         reductions = self.find_reductions(func_node, reduction_params)
     
         # Collect reduction AST nodes to exclude from assignments
@@ -129,25 +127,11 @@ class KernelParser:
         all_assignment_nodes = self.find_all_assignments(func_node)
         print("PRINTING")
         print(all_assignment_nodes)
-        # exit(0)
         
         # Filter out reductions from assignments
         assignment_nodes = [node for node in all_assignment_nodes if node not in reduction_nodes]
     
-        # 2. Find the assignment statement in the function body
-        # reductions = self.find_reductions(func_node, reduction_params)
-        # assignment_nodes = self.find_all_assignments(func_node)
-
-        # reduction_nodes = {r.reduction_ast for r in reductions}
-
-        # assignment_nodes = [
-        #     a for a in assignment_nodes
-        #     if a not in reductions
-        # ]
-
-        print(assignment_nodes)
-        # exit(0)
-        
+      
         if not assignment_nodes:
             raise ParseError(f"No assignment found in kernel {func_node.spelling}")
         
@@ -164,13 +148,6 @@ class KernelParser:
             # 4. Extract all RHS accesses
             accesses = self.extract_accesses_from_expr(rhs, loop.ndim)
             all_accesses.extend(accesses)
-
-        
-
-        print(f"Found {len(reductions)} reductions:")
-        for red in reductions:
-            print(f"  - {red.param_name}: {red.access_type}")
-            print(f"    AST: {red.reduction_ast.kind}")
 
         for reduction in reductions:
             # Get the RHS of the compound assignment (e.g., A(0,0) in *sum += A(0,0))
@@ -220,16 +197,16 @@ class KernelParser:
                     
                     # Check if LHS is a pointer dereference
                     if lhs.kind == CursorKind.UNARY_OPERATOR:
-                        # Get the token to check if it's '*'
+                        # Get the token to check if '*'
                         tokens = list(lhs.get_tokens())
                         if tokens and tokens[0].spelling == '*':
-                            # It's a dereference - get the variable name
+                            # If a dereference - get the variable name
                             deref_children = list(lhs.get_children())
                             if deref_children:
                                 var_name = deref_children[0].spelling
                                 
                                 if var_name in reduction_params:
-                                    # Found a reduction operation!
+                                    # Found a reduction operation
                                     access_type = reduction_params[var_name]
                                     reductions.append(ReductionInfo(
                                         param_name=var_name,
@@ -237,40 +214,7 @@ class KernelParser:
                                         reduction_ast=node
                                     ))
 
-            # if node.kind == CursorKind.BINARY_OPERATOR:
-            #     tokens = [t.spelling for t in node.get_tokens()]
-                
-            #     if '=' in tokens:
-            #         children = list(node.get_children())
-            #         if len(children) != 2:
-            #             continue
-                    
-            #         lhs, rhs = children
-                    
-            #         # Check for *error
-            #         if lhs.kind == CursorKind.UNARY_OPERATOR:
-            #             lhs_tokens = [t.spelling for t in lhs.get_tokens()]
-                        
-            #             if lhs_tokens and lhs_tokens[0] == '*':
-            #                 deref_child = list(lhs.get_children())[0]
-                            
-            #                 if deref_child.kind == CursorKind.DECL_REF_EXPR:
-            #                     var_name = deref_child.spelling
-                                
-            #                     if var_name in reduction_params:
-            #                         # 🔥 Now check RHS matches reduction pattern
-                                    
-            #                         if rhs.kind == CursorKind.CALL_EXPR:
-            #                             func_name = list(rhs.get_children())[0].spelling
-                                        
-            #                             if func_name in ['fmax', 'fmin']:
-            #                                 reductions.append(ReductionInfo(
-            #                                     param_name=var_name,
-            #                                     access_type=reduction_params[var_name],
-            #                                     reduction_ast=node
-            #                                 ))
-
-                 # Pattern 2: Assignment with reduction function (*error = fmax(*error, ...))
+            # Pattern 2: Assignment with reduction function (*error = fmax(*error, ...))
             elif node.kind == CursorKind.BINARY_OPERATOR:
                 tokens = list(node.get_tokens())
                 # Check if it's assignment
@@ -321,10 +265,8 @@ class KernelParser:
         assignments = []
 
         for node in func_node.walk_preorder():
-            # print(node.kind)
-            # print(node.spelling)
             if node.kind == CursorKind.BINARY_OPERATOR:
-                # Check if it's an assignment
+                # Check if an assignment
                 tokens = list(node.get_tokens())
                 for token in tokens:
                     if token.spelling == '=':
@@ -335,8 +277,6 @@ class KernelParser:
     
     def split_assignment(self, assignment_node: Cursor) -> Tuple[Cursor, Cursor]:
         """Split assignment into LHS and RHS"""
-
-
 
         children = list(assignment_node.get_children())
         if len(children) != 2:
@@ -383,9 +323,7 @@ class KernelParser:
                 offsets.append(offset)
             
             return StencilAccess(field_name, tuple(offsets))
-        
 
-        
         raise ParseError(f"Expected CALL_EXPR, got {node.kind}.")
     
     def evaluate_offset(self, node: Cursor) -> int:
@@ -430,6 +368,9 @@ class KernelParser:
         after = source[brace_index + 1:]
 
         # Inject locals right after {
+        # TODO: This hardcoding of global consts is due to them being declared
+        # using external functions. This is a known limitation of this parsing approach
+        # when kernel functions have no defined specification to reduce the allowed operations 
         locals_block = """
         const double pi = 3.14;
         int jmax = 100;
@@ -443,23 +384,13 @@ class KernelParser:
         
         args = ['-std=c++11', '-fsyntax-only']
 
-
-
         # TODO: Use include directory to stop ACC errors from parser
         
-        # Use a dummy filename since we're parsing from string
+        # Use a dummy filename since parsing from string
         filename = "kernel.cpp"
 
-        # source = """
-        # void left_bndcon(ACC<double> &A, const int *idx) {
-        #     A(0,0) = sin(pi * (idx[1]+1) / (jmax+1));
-        # }
-        # """
-
         modified_source = self.inject_locals_into_function(source)
-        print(modified_source)
-        # exit(0)
-        
+        print(modified_source)       
         
         translation_unit = Index.create().parse(
             filename,
@@ -529,60 +460,11 @@ class KernelParser:
                 global_consts
             )
 
-
         # 4. Return ALL results (one per write field)
-        return_op = ReturnOp.create(operands=results)  # Multiple operands!
+        return_op = ReturnOp.create(operands=results)
         ops.append(return_op)
         
         return ops
-
-
-    # def generate_reduction_op(self, reduction: ReductionInfo, access_values: Dict, ops_list: List[IRDLOperation], kernel_info: KernelInfo, global_consts: dict[str, Any]) -> None:
-    #     compound_assign = reduction.reduction_ast
-    #     children = list(compound_assign.get_children())
-
-    #     rhs = children[1] if len(children) > 1 else children[0]
-
-    #     reduce_value = self.build_computation_ops(
-    #         rhs,
-    #         access_values,
-    #         ops_list,
-    #         kernel_info,
-    #         global_consts
-    #     )
-
-    #     if isinstance(reduce_value.type, IntegerType):
-    #         cast_op = arith.SIToFOp(reduce_value, f64)
-    #         ops_list.append(cast_op)
-    #         reduce_value = cast_op.results[0]
-
-
-    #     body_block = Block(arg_types=[f64, f64])
-    #     lhs_arg = body_block.args[0]
-    #     rhs_arg = body_block.args[1]
-
-    #     if reduction.access_type == ops.AccessType.OPS_INC:
-    #         init_value = arith.ConstantOp(FloatAttr(0.0, f64))
-    #         combine_op = arith.AddfOp(lhs_arg, rhs_arg)
-    #     elif reduction.access_type == ops.AccessType.OPS_MIN:
-    #         init_value = arith.ConstantOp(FloatAttr(1.7976931348623157e+308, f64))
-    #         combine_op = arith.MinimumFOp(lhs_arg, rhs_arg)
-    #     elif reduction.access_type == ops.AccessType.OPS_MAX:
-    #         init_value = arith.ConstantOp(FloatAttr(-1.7976931348623157e+308, f64))
-    #         combine_op = arith.MaximumFOp(lhs_arg, rhs_arg)
-    #     else:
-    #         raise ValueError(f"Unsupported reduction type: {reduction.access_type}")
-        
-    #     body_block.add_op(combine_op)
-
-    #     return_op = YieldOp(combine_op.results[0])
-    #     body_block.add_op(return_op)
-
-    #     body_region = Region([body_block])
-
-    #     reduce_op = ReduceOp(reduce_value, init_value.results[0], body_region)
-    #     ops_list.append(reduce_op)
-
 
     def generate_reduction_op(self, reduction: ReductionInfo, access_values: Dict, ops_list: List[IRDLOperation], kernel_info: KernelInfo, global_consts: dict[str, Any]) -> None:
         compound_assign = reduction.reduction_ast
@@ -628,6 +510,10 @@ class KernelParser:
         rhs_arg = body_block.args[1]  # new value
         
         compare_op = None
+        
+        # NOTE: The reduction ops use a compare and select pattern; this is because openMP lowering does not support operations 
+        # like arith.maximumf and arith.minimumf, but compare and select is explicitly supported in the MLIR source code
+
         if reduction.access_type == ops.AccessType.OPS_INC:
             init_value = arith.ConstantOp(FloatAttr(0.0, f64))
             combine_op = arith.AddfOp(lhs_arg, rhs_arg)
@@ -642,6 +528,7 @@ class KernelParser:
         
         if compare_op is not None:
             body_block.add_op(compare_op)
+
         body_block.add_op(combine_op)
         return_op = YieldOp(combine_op.results[0])
         body_block.add_op(return_op)
@@ -651,11 +538,9 @@ class KernelParser:
         ops_list.append(reduce_op)
 
 
-
     def create_stencil_access(self, access: StencilAccess, temp_ssa_value: SSAValue) -> AccessOp:
         """Create stencil.access operation for A(i, j)"""
         
-        print(access.offsets)
         access_op = AccessOp.get(
             temp_ssa_value,
             access.offsets
@@ -663,7 +548,8 @@ class KernelParser:
         
         return access_op
 
-
+    # This is the main function that takes parsed kernel function details and converts them into 
+    # equivalent MLIR operations
     def build_computation_ops(
         self,
         expr_node: Cursor,
@@ -701,7 +587,7 @@ class KernelParser:
 
                     return self._index_values[dim_index]
         
-        # NEW: Handle function calls (sin, exp, fmax, fabs)
+        # Handle function calls (sin, exp, fmax, fabs)
         elif expr_node.kind == CursorKind.CALL_EXPR:
             children = list(expr_node.get_children())
             
@@ -711,19 +597,18 @@ class KernelParser:
             func_name_node = children[0]
             func_name = func_name_node.spelling
 
-                # If spelling is empty, try getting from tokens
+            # If spelling is empty, try getting from tokens
             if not func_name:
                 tokens = list(func_name_node.get_tokens())
                 if tokens:
                     func_name = tokens[0].spelling
             
-            # Still empty? Try getting from the call expression itself
+            # Still empty - Try getting from the call expression itself
             if not func_name:
                 tokens = list(expr_node.get_tokens())
                 if tokens:
                     func_name = tokens[0].spelling
             
-            print(f"DEBUG: func_name = '{func_name}'")  # Debug print
             
             # Check if it's a math function
             if func_name in ['sin', 'cos', 'exp', 'fabs', 'sqrt', 'log']:
@@ -732,8 +617,6 @@ class KernelParser:
                     raise ParseError(f"{func_name} expects 1 argument")
                 
                 arg = self.build_computation_ops(children[1], access_values, ops_list, kernel_info, global_consts)
-                
-                # Import math dialect
                 
                 if func_name == 'sin':
                     op = math_dialect.SinOp(arg)
@@ -770,14 +653,11 @@ class KernelParser:
             else:
                 # It's a stencil accessor like A(1, 0)
 
-                # print("func_name")
-                # print(func_name)
-                # exit(0)
                 access = self.parse_accessor(expr_node, dim=2)
                 key = (access.field_name, access.offsets)
                 return access_values[key]
             
-        # NEW: Handle unary operators (pointer dereference, negation)
+        # Handle unary operators (pointer dereference, negation)
         elif expr_node.kind == CursorKind.UNARY_OPERATOR:
             tokens = list(expr_node.get_tokens())
             
@@ -792,14 +672,8 @@ class KernelParser:
                     reduction_param_names = {red.param_name for red in kernel_info.reductions}
                     if var_name in reduction_param_names:
                         # This references the current accumulator value in the reduction
-                        # We need to create a block argument for this
-                        # For now, create a placeholder that will be replaced in generate_reduction_op
+                        # This is handled specially in generate_reduction_op, error if we got to this point here
                         
-                        # Actually, for reductions, *error in the RHS should reference
-                        # the accumulator value, which is a block argument in the reduction body
-                        # This is handled specially in generate_reduction_op
-                        
-                        # Return a special marker or just raise an error for now
                         raise ParseError(f"Reduction accumulator '{var_name}' reference in expression - handle in reduction generation")
                     
                     raise ParseError(f"Pointer dereference of non-reduction variable: {var_name}")
@@ -828,7 +702,7 @@ class KernelParser:
             raise ParseError(f"Unknown variable reference: {var_name}")
 
 
-        # NEW: Handle variable references (like 'pi')
+        # Handle variable references (like 'pi')
         elif expr_node.kind == CursorKind.DECL_REF_EXPR:
             var_name = expr_node.spelling
             
@@ -913,9 +787,6 @@ class KernelParser:
                     op = arith.DivfOp(left, right)
                 else:
                     raise ParseError(f"Unsupported operator: {operator}")
-                
-
-            
             
             ops_list.append(op)
             return op.results[0]
@@ -931,7 +802,6 @@ class KernelParser:
             if children:
                 return self.build_computation_ops(children[0], access_values, ops_list, kernel_info, global_consts)
         
-
         elif expr_node.kind == CursorKind.UNARY_OPERATOR:
             children = list(expr_node.get_children())
             
@@ -957,13 +827,14 @@ class KernelParser:
                 return op.results[0]
             
             elif operator == '+':
-                # Unary plus → no-op
+                # Unary plus -> no-op
                 return operand
             
             else:
                 raise ParseError(f"Unsupported unary operator: {operator}")
 
         raise ParseError(f"Unsupported expression kind: {expr_node.kind}")
+
 
     def get_func_name(self, call_expr: Cursor) -> str:
         """Helper to extract function name from CALL_EXPR"""

@@ -1,19 +1,17 @@
 from util import Findable
 from strategy import Strategy
 from store import Application, Program
-from ops_dialect.generate_ir import create_wrapper_func, create_function_with_wrapper, create_func_with_wrapper, add_ops_operations
+from ops_dialect.generate_ir import create_wrapper_func, add_ops_operations
 from xdsl.context import Context
 from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
 from ops_dialect.lower_extractions import LowerOpsExtractionsPass
 from ops_dialect.lower_ptr_to_memref import LowerPtrToMemrefPass
 from ops_dialect.lower_index import LowerOpsIndexPass
-import xdsl
 from xdsl.transforms.experimental.convert_stencil_to_ll_mlir import ConvertStencilToLLMLIRPass
-from xdsl.transforms.stencil_bufferize import StencilBufferize
 from xdsl.transforms.canonicalize import CanonicalizePass
 from xdsl.transforms.gpu_map_parallel_loops import GpuMapParallelLoopsPass
-from kernel_config import KernelConfig, attachKernelInfo
+from kernel_config import KernelConfig
 from language import Lang
 from xdsl.transforms.scf_parallel_loop_tiling import ScfParallelLoopTilingPass
 from xdsl.printer import Printer
@@ -26,7 +24,6 @@ from mlir.dialects.llvm import translate_module_to_llvmir
 from xdsl.passes import PassPipeline as xDSLPassManager
 
 import ops
-from typing import Tuple
 from kernel_parser import KernelParser
 
 """Abstract class for a lowering pipeline"""
@@ -53,21 +50,10 @@ class Pipeline(Findable):
             kernel_info = self.kernel_parser.parseC(loop, program, app)
 
         elif (lang.name == "Fortran"):
-            # TODO: Work on Fortran parser
+            # TODO: Fortran parser creation - currently out of scope
             kernel_info = self.kernel_parser.parseFortran(loop, program, app)
 
-        print(kernel_info)
-
-        attachKernelInfo(kernel_config, kernel_info)
-
         kernel_config.kernel_info = kernel_info
-
-        print("Parsed kernel module:")
-        print(kernel_info)
-
-        # self.kernel_parser.kernel_info_to_stencil_ops(kernel_info)
-        print(kernel_info)
-        # kernel_module = None
 
         # Build starting IR
         xdsl_ctx = Context()
@@ -75,18 +61,12 @@ class Pipeline(Findable):
         ir_module = create_wrapper_func(kernel_config)
         ir_module = add_ops_operations(ir_module, kernel_config)
 
-        # ir_module = create_func_with_wrapper(kernel_config)
-
-        # print(ir_module)
-        # exit(0)
-
-
         pm = xDSLPassManager([
             LowerParLoopPass(kernel_config),
             LowerComputePass(kernel_config),
             LowerOpsExtractionsPass(),
             LowerPtrToMemrefPass(kernel_config),
-            # # # StencilBufferize(), no longer needed!
+            # StencilBufferize(), not needed as OPS has grid memory predefined!
             ConvertStencilToLLMLIRPass(),
             LowerOpsIndexPass(),
             CanonicalizePass()
@@ -94,43 +74,24 @@ class Pipeline(Findable):
 
         pm.apply(xdsl_ctx, ir_module)
 
-        # # print(ir_module)
-        # print(ir_module)
-        # exit(0)
 
-        with open("demofile.mlir", "w") as f:
-            f.write(str(ir_module))
-        # exit(0)
+        # OPTIONAL: Print IR to file for debugging purposes
+        # with open("demofile.mlir", "w") as f:
+        #     f.write(str(ir_module))
+
 
         if (self.strategy.name == "gpu_nvvm"):
             pm = xDSLPassManager([
+                # This GPU pass exists within xDSL
+                # Only run if the GPU strategy is chosen
                 GpuMapParallelLoopsPass(),
             ])
 
             pm.apply(xdsl_ctx, ir_module)
 
-        print(ir_module)
-
-
-        # # read in ir_module from file
-        # print("RUN ---------------------")
-        # with mlir_ir.Context() as ctx:
-        #     # ctx.allow_unregistered_dialects = True
-        #     with open("mapping.mlir", "r") as f:
-        #         module = mlir_ir.Module.parse(f.read())
-            
-        #     pm = MLIRPassManager.parse("builtin.module(func.func(convert-parallel-loops-to-gpu))")
-        #     pm.run(module.operation)
-        #     print(module)
-
-        # return None
-        # exit(0)
-        # return ir_module
+        # Once all xDSL passes are applied, convert the IR to an MLIR module
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
-        # print(mlir_module)
-        # return None
-        # Do strategy-specific lowering
         result = self.run_mlir_passes(mlir_module, mlir_ctx)
 
         return result
@@ -143,10 +104,6 @@ class Pipeline(Findable):
 
         ctx = mlir_ir.Context()
         
-        print("--------------------")
-        print(xdsl_module)
-        print("--------------------")
-
         mlir_module = mlir_ir.Module.parse(buf.getvalue(), context=ctx)
 
         return mlir_module, ctx
@@ -158,75 +115,21 @@ class Pipeline(Findable):
         ctx: Context
     ) -> str:
         """Run a list of MLIR passes on the MLIR module."""
-        # passes = self.passes()
-
-        # op = mlir_module.operation
-
-        # pm = MLIRPassManager(context=ctx)
-
-        # for p in passes:
-        #     pm.add(p)
-        # pm.run(op)
-
-
-        # with open("demofile.mlir", "w") as f:
-        #     f.write(str(mlir_module))
-
-        # print(mlir_module)
-        # print("CHECK POINT --------------")
-
-        # # After your lowering passes, before mlir-translate
-
-
-        # # equivalent to running mlir-translate
-        # res = translate_module_to_llvmir(mlir_module.operation)
-        # with open("output.mlir", "w") as f:
-        #     f.write(str(mlir_module))
-        # print("Wrote MLIR to output.mlir")
-
-        print("----------------------------")
-        print("RUNNING MLIR PASSES")
-        print("----------------------------")
-
         passes = self.passes()
+
         op = mlir_module.operation
 
-        for i, p in enumerate(passes):
-            print(f"\n=== Running pass {i}: {p} ===")
+        pm = MLIRPassManager(context=ctx)
 
-            pm = MLIRPassManager(context=ctx)
-
-            # if p == "gpu-map-parallel-loops"    :
-            #     pm.add(f"builtin.module(func.func({p}))")
-            # else:
+        for p in passes:
             pm.add(p)
-
-            # pm.add(p)
-
-            pm.run(op)
-
-            # Print IR after this pass
-            print(f"\n--- IR after pass {i} ({p}) ---")
-            # print(mlir_module)
-            # print("CHECK POINT --------------")
-
-            # Optional: dump to file per pass
-            with open(f"demofile_pass_{i}.mlir", "w") as f:
-                f.write(p)
-                f.write("\n")
-                f.write(str(mlir_module))
+        pm.run(op)
 
         # Final translation step
         res = translate_module_to_llvmir(mlir_module.operation)
 
-        with open("output.mlir", "w") as f:
-            f.write(str(mlir_module))
-
-        print("Wrote MLIR to output.mlir")
-
-
         # Replace nuw to make compilation valid
-        # TODO: work out reason for this - I think compiler / mlir version mismatches
+        # TODO: work out reason for this - I think compiler / mlir version mismatches with clang version
         res = res.replace(" nuw ", " ")
         res = res.replace("nocreateundeforpoison ", "")
 
@@ -237,6 +140,7 @@ class Pipeline(Findable):
         return self.strategy == strat
 
     def passes(self):
+        # Used by derived classes to return strategy-specific passes
         pass
 
 

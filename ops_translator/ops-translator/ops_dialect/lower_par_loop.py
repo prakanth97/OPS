@@ -30,7 +30,6 @@ class LowerParLoopPass(ModulePass):
 
     def __init__(self, config: KernelConfig):
         self.config = config
-        print(f"LowerParLoopPass initialized with config: {config.name}, bounds: {config.iteration_bounds}")
 
     
     def apply(self, ctx, module):
@@ -82,8 +81,6 @@ class LowerParLoopPass(ModulePass):
         # Then call it with the arguments (field_operands and reduction_operands)
         # Then place the ops.compute op in the impl function
 
-        # ---------------------------
-
         builder = Builder(InsertPoint.at_end(module.body.block))  
 
         param_types = [v.type for v in [*field_operands, *reduction_operands]]
@@ -97,10 +94,6 @@ class LowerParLoopPass(ModulePass):
         fn = func.FuncOp(
             name=self.config.name + "_impl",
             function_type=func.FunctionType.from_lists(param_types, []),
-            #     inputs=param_types,
-            #     outputs=LLVMVoidType(),
-            # ),
-            # linkage=LinkageAttr("external"),
             region=Region([entry_block]),
         )
 
@@ -109,12 +102,10 @@ class LowerParLoopPass(ModulePass):
         builder1 = Builder(InsertPoint.at_end(entry_block))
 
         builder1.insert(ComputeOp.create(
-            operands=[*(fn_op.args)], #? 
+            operands=[*(fn_op.args)],
         ))
 
         builder1.insert(func.ReturnOp())
-
-        # ---------------------------
 
         par_loop.detach()
         par_loop.erase()
@@ -238,3 +229,4 @@ class LowerParLoopPass(ModulePass):
 
         op.result.name_hint = "data_ref"
         return op.result
+    

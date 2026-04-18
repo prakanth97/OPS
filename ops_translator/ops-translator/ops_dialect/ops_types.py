@@ -77,4 +77,3 @@ ops_reduction_type = LLVMStructType(
         LLVMPointerType(),     # 7: OPS_instance *instance
     ])
 )
-

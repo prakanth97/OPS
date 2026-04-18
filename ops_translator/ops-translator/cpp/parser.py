@@ -9,7 +9,7 @@ from store import Function, Location, ParseError, Program, Type
 from util import safeFind #TODO: implement safe find
 from dataclasses import dataclass
 
-
+# New constant evaluator mechanism
 class ConstantEvaluator:
     def __init__(self):
         self.constants = {}  # var_name -> value
@@ -56,37 +56,25 @@ class ConstantEvaluator:
             return None
         
         elif node.kind == CursorKind.BINARY_OPERATOR:
-            # print(f"{'  ' * depth}Evaluating BINARY_OPERATOR")
             children = list(node.get_children())
-            # print(f"{'  ' * depth}  Has {len(children)} children")
             
             if len(children) != 2:
-                # print(f"{'  ' * depth}  Wrong number of children!")
                 return None
             
-            # print(f"{'  ' * depth}  Left child: {children[0].kind}, spelling: {children[0].spelling}")
             left = self.evaluate(children[0], depth + 1)
-            # print(f"{'  ' * depth}  Left result: {left}")
-            
-            # print(f"{'  ' * depth}  Right child: {children[1].kind}, spelling: {children[1].spelling}")
             right = self.evaluate(children[1], depth + 1)
-            # print(f"{'  ' * depth}  Right result: {right}")
 
             if left is None or right is None:
-                # print(f"{'  ' * depth}  One side is None!")
                 return None
                 
             
             # Find operator token
             tokens = list(node.get_tokens())
-            # print(f"{'  ' * depth}  Tokens: {[t.spelling for t in tokens]}")
             left_tokens = list(children[0].get_tokens())
-            # print(f"{'  ' * depth}  Left tokens: {[t.spelling for t in left_tokens]}")
             
             op_idx = len(left_tokens)
             if op_idx < len(tokens):
                 op = tokens[op_idx].spelling
-                # print(f"{'  ' * depth}  Operator: {op}")
                 
                 if op == '+': return left + right
                 elif op == '-': return left - right
@@ -418,8 +406,6 @@ def parseAccessType(node: Cursor, loc: Location, macros: Dict[Location, str]) ->
     if parseLocation(node) in macros.keys():
         access_type_str = macros[parseLocation(node)]
 
-#        print(str(loc) + "   " + access_type_str)
-
         access_type_map = {"OPS_READ": 0, "OPS_WRITE": 1, "OPS_RW": 2, "OPS_INC": 3, "OPS_MIN": 4, "OPS_MAX": 5}
 
         if access_type_str not in access_type_map:
@@ -483,7 +469,7 @@ def parseBlock(node: Cursor, dim: int) -> ops.Block:
     loc = parseLocation(node)
     return ops.Block(loc, ptr, dim)
 
-
+# NEW - Parse the loop iteration range
 def parseRange(node: Cursor, dim: int, evaluator: ConstantEvaluator) -> ops.Range:
     ptr = parseIdentifier(node)
     loc = parseLocation(node)
@@ -516,8 +502,7 @@ def parseRange(node: Cursor, dim: int, evaluator: ConstantEvaluator) -> ops.Rang
             )
         bounds.append(value)
     
-    # Validate bounds count (should be 2*dim)
-    # TODO: Should this only be 2 * dim - or dim^2?
+    # Validate bounds count
     expected_count = 2 * dim
     if len(bounds) != expected_count:
         raise ValueError(
@@ -525,7 +510,6 @@ def parseRange(node: Cursor, dim: int, evaluator: ConstantEvaluator) -> ops.Rang
         )
     
     return ops.Range(loc, ptr, dim, bounds)
-
 
 def find_variable_declaration(node: Cursor) -> Optional[Cursor]:
     """Find the declaration of the variable referenced by this node"""
@@ -579,7 +563,6 @@ def parseLoop(translation_unit: TranslationUnit, args: List[Cursor], loc: Locati
 
 
     kernel = parseIdentifier(args[0])
-    name   = parseStringLit(args[1])
     dim    = parseIntLiteral(args[3])
     block  = parseBlock(args[2], dim)
     range = parseRange(args[4], dim, evaluator)
@@ -623,7 +606,7 @@ def extract_constants_from_file(cursor: Cursor, evaluator: ConstantEvaluator):
             if "imax" in node.spelling or "imax" in node.type.spelling:
                 found = True
             
-            # Check if it's const
+            # Check if const
             if 'const' in node.type.spelling:
                 var_name = node.spelling
                 
@@ -669,14 +652,7 @@ def parse_decl_dat_call_from_args(args: List[Cursor], evaluator: ConstantEvaluat
     if len(args) < 7:
         return None
     
-    # args[0] = block
-    # args[1] = dim
-    # args[2] = size array
-    # args[3] = base array  
-    # args[4] = d_m array
-    # args[5] = d_p array
-    # args[6+] = data pointer, type, name
-    
+    # Get size and halo details
     size = evaluate_array_argument(args[2], evaluator)
     base = evaluate_array_argument(args[3], evaluator)
     d_m = evaluate_array_argument(args[4], evaluator)
@@ -686,40 +662,6 @@ def parse_decl_dat_call_from_args(args: List[Cursor], evaluator: ConstantEvaluat
         print(f"Warning: Could not evaluate arrays: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
         return None
     
-    return size, base, d_m, d_p
-
-
-def parse_decl_dat_call(call_node: Cursor, evaluator: ConstantEvaluator) -> Optional[Tuple]:
-    """
-    Parse: ops_decl_dat(block, 1, size, base, d_m, d_p, A, "double", "A")
-    Extract: the size, base, d_m, d_p arrays
-    """
-    # Get call arguments
-    args = list(call_node.get_arguments())
-    if len(args) < 7:
-        print(f"ops_decl_dat has {len(args)} args, expected at least 7")
-        return None
-    
-    # args[0] = block
-    # args[1] = dim (1)
-    # args[2] = size array
-    # args[3] = base array
-    # args[4] = d_m array
-    # args[5] = d_p array
-    # args[6] = data pointer (A)
-    # args[7] = type string
-    # args[8] = name string
-    
-    size = evaluate_array_argument(args[2], evaluator)
-    base = evaluate_array_argument(args[3], evaluator)
-    d_m = evaluate_array_argument(args[4], evaluator)
-    d_p = evaluate_array_argument(args[5], evaluator)
-    
-    if size is None or base is None or d_m is None or d_p is None:
-        print(f"Warning: Could not evaluate arrays: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
-        return None
-    
-    print(f"Parsed dat info: size={size}, base={base}, d_m={d_m}, d_p={d_p}")
     return size, base, d_m, d_p
 
 
@@ -727,7 +669,7 @@ def evaluate_array_argument(node: Cursor, evaluator: ConstantEvaluator) -> Optio
     """
     Evaluate an array argument (either literal {6, 6} or variable reference 'size')
     """
-    # Check if it's a variable reference
+    # Check if a variable reference
     if node.kind == CursorKind.DECL_REF_EXPR or node.kind == CursorKind.UNEXPOSED_EXPR:
         # Find the variable declaration
         var_decl = find_variable_declaration(node)
@@ -753,6 +695,7 @@ def evaluate_array_initializer(init_list: Cursor, evaluator: ConstantEvaluator) 
             return None
         values.append(val)
     return values
+
 
 def parseConstantDeclarations(cursor: Cursor, program: Program) -> Dict[str, Any]:
     """
@@ -784,6 +727,6 @@ def parseConstantDeclarations(cursor: Cursor, program: Program) -> Dict[str, Any
                         if tokens:
                             const_values[var_name] = int(tokens[0].spelling)
                 except:
-                    pass  # Skip if we can't evaluate
+                    pass  # Skip if can't evaluate
     
     return const_values

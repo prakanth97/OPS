@@ -48,7 +48,7 @@ class OpenMP(Pipeline):
             "expand-strided-metadata",
             "finalize-memref-to-llvm",
 
-            "canonicalize", # extra one
+            "canonicalize",
             "convert-scf-to-cf",
             "convert-cf-to-llvm",
             "lower-affine",
@@ -89,11 +89,11 @@ class GPUCUDA(Pipeline):
             "cse",
             "reconcile-unrealized-casts",
 
+            # This pass is not crucial, but was not able to get working
             # f"scf-parallel-loop-tiling{{parallel-loop-tile-sizes={block_sizes_str}}}",
+            
             "func.func(gpu-map-parallel-loops)",
             "func.func(convert-parallel-loops-to-gpu)",
-            
-            # "convert-parallel-loops-to-gpu",
             
             "canonicalize",
             "cse",
@@ -115,7 +115,7 @@ class GPUCUDA(Pipeline):
             
             "convert-arith-to-llvm",
             "convert-math-to-llvm",
-            "convert-scf-to-cf",
+            "convert-scf-to-cf",    
             "convert-cf-to-llvm",
             "canonicalize",
             "cse",
@@ -129,34 +129,21 @@ class GPUCUDA(Pipeline):
             "gpu-module-to-binary",
             "canonicalize",
             "cse",
-            
-            # "convert-index-to-llvm=index-bitwidth=64",
-            # "convert-ub-to-llvm",
-            # "convert-nvvm-to-llvm",
-            # "convert-to-llvm",
-            # "canonicalize",
-            # "cse",
-            # "finalize-memref-to-llvm",
-
-
         ]
     
     def _detect_gpu_sm(self) -> str:
         """Auto-detect GPU compute capability"""
-        gpu_sm = 89
-        return gpu_sm
         
         # Check environment variable first
         gpu_sm = os.environ.get("OPS_GPU_SM")
         if gpu_sm:
             return gpu_sm
         
-        # Try auto-detection
+        # Try to auto-detect GPU sm version
         try:
             import pycuda.driver as cuda
             import pycuda.autoinit
             
-            # should we always take device 0?
             dev = cuda.Device(0)
             major, minor = dev.compute_capability()
             return f"{major}{minor}"
@@ -164,7 +151,7 @@ class GPUCUDA(Pipeline):
             raise RuntimeError(
                 "PyCUDA is not installed. Install it with `pip install pycuda`.\n"
                 "Note: PyCUDA only works if you have an NVIDIA GPU and CUDA installed.\n"
-                "If you do not have an NVIDIA GPU, run the script again with '--device cpu'."
+                "If you do not have an NVIDIA GPU, run the script again with '-s seq' or '-s openmp'."
             )
         except cuda.Error as e:
             raise RuntimeError(f"Failed to detect GPU compute capability: {e}")

@@ -1,12 +1,11 @@
 from xdsl.passes import ModulePass
 from xdsl.builder import Builder, InsertPoint
 
-from xdsl.dialects.builtin import i64, DenseArrayBase, MemRefType, f64, IntegerAttr
-from xdsl.dialects import stencil, memref
+from xdsl.dialects.builtin import i64, DenseArrayBase
+from xdsl.dialects import stencil
 
 from .ops_dialect import *
 from xdsl.dialects.llvm import LLVMPointerType, ExtractValueOp, GEPOp, LoadOp
-from xdsl.dialects import arith
 
 from .ops_types import *
 
@@ -21,8 +20,6 @@ class LowerOpsExtractionsPass(ModulePass):
                 self.lower_extract_arg_dat(op)
             elif isinstance(op, ExtractArgDatDataOp):
                 self.lower_extract_arg_dat_data(op)
-            # elif isinstance(op, PointerToMemref):
-            #     self.lower_ptr_to_memref(op)
             elif isinstance(op, MemrefToStencilField):
                 self.lower_memref_to_field(op)
 
@@ -91,52 +88,9 @@ class LowerOpsExtractionsPass(ModulePass):
             LLVMPointerType()
         ))
         
-        # Add offset to the pointer (72 bytes = 9 doubles for halo offset)
-        # TODO: Add base offset to pointer dynamically
-        # offset_const = builder.insert(arith.ConstantOp(IntegerAttr(72, i64)))
-        
-        # adjusted_ptr = builder.insert(GEPOp.from_mixed_indices(
-        #     data_ptr.results[0],
-        #     indices=[offset_const.results[0]],  # dynamic offset
-        #     pointee_type=IntegerType(8),  # i8 for byte-level pointer offset arithmetic
-        #     result_type=LLVMPointerType(),
-        # ))
-        
         op.results[0].replace_all_uses_with(data_ptr.results[0])
         op.detach()
         op.erase()
-
-    # def lower_ptr_to_memref(self, op: PointerToMemref):
-        
-    #     builder = Builder(InsertPoint.before(op))
-
-    #     # Convert pointer to memref
-    #     total_size_0 = 8
-    #     total_size_1 = 8
-
-    #     ref_type = MemRefType(f64, [total_size_0, total_size_1])
-
-
-    #     ref = memref.ReinterpretCastOp(
-    #         source=op.operands[0],
-    #         result_type=ref_type,
-    #         static_offsets=[0],
-    #         static_sizes=[8, 8],
-    #         static_strides=[8, 1],
-    #         offsets=[],
-    #         sizes=[],
-    #         strides=[]
-    #     )
-
-    #     ref.results[0].name_hint = "data_ref"
-
-    #     builder.insert(ref)
- 
-    #     op.results[0].replace_all_uses_with(ref.results[0])
-
-    #     op.detach()
-    #     op.erase()
-
 
     def lower_memref_to_field(self, op: MemrefToStencilField):
     
@@ -153,4 +107,3 @@ class LowerOpsExtractionsPass(ModulePass):
         op.results[0].replace_all_uses_with(cast.results[0])
         op.detach()
         op.erase()
-

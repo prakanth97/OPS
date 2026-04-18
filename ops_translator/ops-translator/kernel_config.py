@@ -25,9 +25,6 @@ class KernelConfig:
 
 def generateKernelConfig(function_name: str, loop: Loop, program: Program) -> KernelConfig:
     
-    print("LOOP")
-    print(loop)
-    
     # All dats in use should have the same size - use first dat to determine size
     dat = loop.dats[0]
     
@@ -63,10 +60,6 @@ def generateKernelConfig(function_name: str, loop: Loop, program: Program) -> Ke
         elif isinstance(arg, ArgReduce):
             arg_order.append(ArgInfo(i, "reduce", arg))
 
-    print(" ")
-    print("ARG ORDER")
-    print(arg_order)
-
     return KernelConfig(
         name=function_name,
         iteration_bounds=normalized_bounds,
@@ -78,16 +71,6 @@ def generateKernelConfig(function_name: str, loop: Loop, program: Program) -> Ke
         arg_order=arg_order,
         global_consts=program.const_values
     )
-
-    # Example bounds
-    # [(0, 8), (0, 1)] # this does just the first column
-
-    # [(0, 1), (0, 8)] # should do bottom row
-
-    # [(7, 8), (0, 8)] # should do top row
-
-    # [(0, 8), (7, 8)] # last col
-
 
     # OPS bound representation
     #  [(xmin, xmax), (ymin, ymax)]
@@ -119,6 +102,3 @@ def normalize_bounds_with_halos(bounds: List[int], dim: int, d_m: List[int]) -> 
     
     # Swap for column-major (stencil dialect)
     return normalized[::-1]
-
-def attachKernelInfo(config: KernelConfig, info: KernelInfo):
-    config.kernel_info = info
